@@ -35,7 +35,10 @@ function noSources(room: FakeBinding): VThermSourceBindings {
   };
 }
 
-function world(mode: 'valve' | 'setpoint' | 'switch'): World {
+function world(
+  mode: 'valve' | 'setpoint' | 'switch',
+  extra: Partial<VThermSourceBindings> = {},
+): World {
   const host = new FakeDeviceHost('salon');
   const emitter = new FakeEmitter('emetteur-salon');
   emitter.mode = mode;
@@ -46,7 +49,7 @@ function world(mode: 'valve' | 'setpoint' | 'switch'): World {
   const participant = new VThermParticipant({
     host,
     emitter,
-    sources: noSources(room),
+    sources: { ...noSources(room), ...extra },
     config: CONFIG,
     syncMode: 'off',
     controlsBoiler: true,
@@ -408,6 +411,22 @@ test('la pile d\'une vanne silencieuse depuis une semaine reste affichable', () 
   assert.ok(
     FRESHNESS.emitterBatteryMs > 7 * DAY_MS,
     'sept jours est la cadence RÉELLE de rapport des vannes de référence, pas une marge de confort',
+  );
+});
+
+test('logement vide depuis une nuit : la présence virtuelle muette reste « absent »', async () => {
+  const presence = new FakeBinding(false, 0);
+  const { host, room, participant } = world('valve', { presence });
+
+  // Une présence pilotée par Flow ne publie rien entre le départ et le retour.
+  const nextMorningMs = 12 * 60 * 60_000;
+  room.setReading(19, nextMorningMs);
+  await participant.tick(nextMorningMs);
+
+  assert.equal(
+    host.getCapabilityValue('vtherm_presence'), false,
+    'à 2 h de fraîcheur, l\'« absent » devenait périmé, donc « présent » : tous les thermostats '
+    + 'remettaient la consigne de présence dans un logement vide',
   );
 });
 

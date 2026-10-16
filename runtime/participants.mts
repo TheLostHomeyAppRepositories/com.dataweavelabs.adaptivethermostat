@@ -47,8 +47,19 @@ export const FRESHNESS = {
   outdoorTempMs: 2 * 60 * MS_PER_MINUTE,
   /** ~7 jours. Un contact qui ne bouge pas n'émet rien ; un « ouvert » périmé gèlerait le logement. */
   windowContactMs: 7 * 24 * 60 * MS_PER_MINUTE,
-  motionMs: 2 * 60 * MS_PER_MINUTE,
-  presenceMs: 2 * 60 * MS_PER_MINUTE,
+  /**
+   * ~7 jours, comme le contact : un détecteur n'émet qu'en changeant d'état. À 2 h, un mmWave qui
+   * voyait quelqu'un depuis plus longtemps devenait périmé, donc « sans mouvement » : la pièce
+   * passait au preset d'inoccupation sous les yeux de son occupant.
+   */
+  motionMs: 7 * 24 * 60 * MS_PER_MINUTE,
+  /**
+   * ~7 jours, pour la même raison. Une présence virtuelle pilotée par Flow ne publie rien entre un
+   * départ et un retour : à 2 h, l'« absent » devenait périmé, et une présence périmée vaut
+   * « présent » — tous les thermostats remettaient la consigne de présence dans un logement vide.
+   * Un appareil réellement hors service reste couvert par `available`.
+   */
+  presenceMs: 7 * 24 * 60 * MS_PER_MINUTE,
   /** ~2 h. Sans lui, la demande de chaleur en mode consigne devient `unknown` (chaudière OFF). */
   emitterHeatingMs: 2 * 60 * MS_PER_MINUTE,
   /**

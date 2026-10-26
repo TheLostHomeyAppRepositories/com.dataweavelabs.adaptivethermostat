@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeStale, resolveTimestamp, toEpochMs } from '../lib/freshness.mjs';
+import { computeStale, deviceReportedAtMs, resolveTimestamp, toEpochMs } from '../lib/freshness.mjs';
 import type { TimestampCandidates } from '../lib/freshness.mjs';
 
 const MINUTE = 60_000;
@@ -89,6 +89,53 @@ test('freshnessMs infini : jamais périmé tant que l\'appareil répond', () => 
 test('horodatage dans le futur (dérive d\'horloge) : traité comme frais, pas comme périmé', () => {
   const stale = computeStale({ atMs: 10 * MINUTE, nowMs: 0, freshnessMs: MINUTE, available: true });
   assert.equal(stale, false);
+});
+
+// --- deviceReportedAtMs ----------------------------------------------------
+
+test('Netatmo stable : une température inchangée reste fraîche tant que le module remonte son CO2', () => {
+  // Relevé de la salle de bain le 2026-10-26 : 18,6 °C datés de 04:30, CO2 et batterie de 06:00.
+  const reportedAtMs = deviceReportedAtMs({
+    measure_temperature: { lastUpdated: '2026-10-26T04:30:46.723Z' },
+    measure_co2: { lastUpdated: '2026-10-26T06:00:47.302Z' },
+    measure_battery: { lastUpdated: '2026-10-26T06:00:47.301Z' },
+  });
+  const atMs = Date.parse('2026-10-26T04:30:46.723Z');
+  const nowMs = Date.parse('2026-10-26T06:03:19.490Z');
+  const freshnessMs = 60 * MINUTE;
+
+  assert.equal(computeStale({ atMs, nowMs, freshnessMs, available: true }), true, 'sans signe de vie');
+  assert.equal(computeStale({ atMs, nowMs, freshnessMs, available: true, deviceReportedAtMs: reportedAtMs }), false);
+});
+
+test('nos propres écritures ne sont pas un signe de vie : les capabilities inscriptibles sont ignorées', () => {
+  // Une TRVZB capteur de pièce : l'app lui écrit sa consigne, sa sonde, elle, s'est tue.
+  const reportedAtMs = deviceReportedAtMs({
+    measure_temperature: { lastUpdated: 1_000, setable: false },
+    target_temperature: { lastUpdated: 9_000_000, setable: true },
+    onoff: { lastUpdated: 9_000_000, setable: true },
+  });
+  assert.equal(reportedAtMs, 1_000);
+});
+
+test('aucune capability datable : aucun signe de vie', () => {
+  assert.equal(deviceReportedAtMs(undefined), null);
+  assert.equal(deviceReportedAtMs({ measure_temperature: { lastUpdated: null } }), null);
+});
+
+test('un signe de vie ne rend pas frais un appareil indisponible', () => {
+  const stale = computeStale({ atMs: 0, nowMs: 10 * MINUTE, freshnessMs: MINUTE, available: false, deviceReportedAtMs: 10 * MINUTE });
+  assert.equal(stale, true);
+});
+
+test('un signe de vie plus ancien que la mesure ne la vieillit pas', () => {
+  const stale = computeStale({ atMs: 10 * MINUTE, nowMs: 11 * MINUTE, freshnessMs: 5 * MINUTE, available: true, deviceReportedAtMs: 0 });
+  assert.equal(stale, false);
+});
+
+test('appareil muet tout entier : la mesure se périme comme avant', () => {
+  const stale = computeStale({ atMs: 0, nowMs: 90 * MINUTE, freshnessMs: 60 * MINUTE, available: true, deviceReportedAtMs: 5 * MINUTE });
+  assert.equal(stale, true);
 });
 
 test('horodatage aberrant : périmé plutôt que frais', () => {

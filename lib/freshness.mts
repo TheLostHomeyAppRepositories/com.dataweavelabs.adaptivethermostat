@@ -85,11 +85,49 @@ export interface StaleInput {
   freshnessMs: number;
   /** `device.available`. Un appareil indisponible rend sa lecture inutilisable quel que soit son âge. */
   available: boolean;
+  /**
+   * Dernier signe de vie de l'APPAREIL, voir `deviceReportedAtMs`. `null` ou absent : seul l'âge
+   * de la mesure compte.
+   */
+  deviceReportedAtMs?: number | null;
+}
+
+/** Ce que `deviceReportedAtMs` lit de chaque capability d'un appareil. */
+export interface ReportedCapability {
+  lastUpdated?: unknown;
+  setable?: boolean;
+}
+
+/**
+ * L'instant où l'appareil a remonté quoi que ce soit pour la dernière fois, ou `null`.
+ *
+ * Homey ne fait avancer `lastUpdated` qu'au CHANGEMENT de valeur. Un module Netatmo interrogé
+ * toutes les dix minutes dans une pièce stable garde donc sa température horodatée de son dernier
+ * changement : deux heures de 18,6 °C la faisaient passer pour morte, et la pièce ne chauffait plus,
+ * pendant que son CO2 et sa batterie, remontés par le même relevé, étaient datés de la minute.
+ *
+ * Seules les capabilities NON inscriptibles comptent. Une consigne ou un `onoff` avancent quand
+ * l'app écrit : sur une TRVZB qui sert aussi de capteur de pièce, nos propres écritures feraient
+ * passer pour fraîche une mesure figée.
+ *
+ * Le prix accepté : une sonde de température morte sur un appareil dont le reste répond paraîtra
+ * fraîche. Pour un module dont tout vient du même relevé, c'est le bon compromis.
+ */
+export function deviceReportedAtMs(
+  capabilities: Readonly<Record<string, ReportedCapability | undefined>> | null | undefined,
+): number | null {
+  let latest: number | null = null;
+  for (const cap of Object.values(capabilities ?? {})) {
+    if (cap === undefined || cap.setable === true) continue;
+    const ms = toEpochMs(cap.lastUpdated);
+    if (ms !== null && (latest === null || ms > latest)) latest = ms;
+  }
+  return latest;
 }
 
 /** Vrai quand la lecture ne doit plus être crue. */
 export function computeStale(input: StaleInput): boolean {
-  const { atMs, nowMs, freshnessMs, available } = input;
+  const { atMs, nowMs, freshnessMs, available, deviceReportedAtMs: reportedAtMs = null } = input;
 
   // Règle non négociable : indisponible ⇒ périmé, même horodaté à l'instant.
   if (!available) return true;
@@ -97,8 +135,14 @@ export function computeStale(input: StaleInput): boolean {
   // Horodatage aberrant : traité comme périmé plutôt que comme frais.
   if (!Number.isFinite(atMs) || !Number.isFinite(nowMs)) return true;
 
+  // Une valeur inchangée reste vraie tant que l'appareil répond : voir `deviceReportedAtMs`.
+  // Le max, jamais le remplacement : un signe de vie plus ancien que la mesure ne la vieillit pas.
+  const lastSeenMs = reportedAtMs !== null && Number.isFinite(reportedAtMs)
+    ? Math.max(atMs, reportedAtMs)
+    : atMs;
+
   // Un horodatage dans le futur (dérive d'horloge de l'émetteur) n'est pas une raison de périmer.
-  const ageMs = Math.max(0, nowMs - atMs);
+  const ageMs = Math.max(0, nowMs - lastSeenMs);
 
   return ageMs > freshnessMs;
 }

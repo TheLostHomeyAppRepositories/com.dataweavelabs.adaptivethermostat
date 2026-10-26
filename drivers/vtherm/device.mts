@@ -306,9 +306,17 @@ export default class VThermDevice extends Homey.Device {
       this.app.requestTick(`${this.deviceId()}:onoff`);
     });
 
+    // Régler une consigne, c'est demander de la chaleur : un thermostat éteint qui l'accepte sans
+    // s'allumer laisse croire que la pièce va chauffer, et la chaudière ne part jamais. La carte
+    // Flow de l'app, elle, n'allume rien — un programme horaire ne doit pas rallumer une pièce
+    // éteinte pour l'été.
     this.registerCapabilityListener('target_temperature', async (value: unknown) => {
       if (typeof value !== 'number') return;
       this.requireParticipant().setManualSetpoint(value);
+      if (this.getCapabilityValue('onoff') === false) {
+        await this.setCapabilityValue('onoff', true);
+        this.app.requestTick(`${this.deviceId()}:onoff`);
+      }
     });
 
     this.registerCapabilityListener('vtherm_preset', async (value: unknown) => {

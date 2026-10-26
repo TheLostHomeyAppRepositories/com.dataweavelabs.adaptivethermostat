@@ -251,3 +251,32 @@ test('`stop()` annule la reprise : rien ne redémarre après un arrêt', async (
     failNextCreates = 0;
   }
 });
+
+// --- Fraîcheur d'une valeur inchangée ---------------------------------------
+
+test('une température stable reste fraîche tant que l\'appareil remonte autre chose', async () => {
+  // Un module Netatmo : Homey ne date la température qu'à son dernier CHANGEMENT. Sans le signe de
+  // vie du CO2, la pièce passait pour aveugle et la chaudière ne démarrait plus.
+  const HOUR = 60 * 60_000;
+  const nowMs = 10 * HOUR;
+  relay.capabilities.push('measure_temperature');
+  relay.capabilitiesObj.measure_temperature = { value: 18.6, lastUpdated: nowMs - 2 * HOUR, setable: false };
+  relay.capabilitiesObj.measure_co2 = { value: 498, lastUpdated: nowMs - 5 * 60_000, setable: false };
+
+  const hub = newHub();
+  const binding = hub.bind(relay.id, 'measure_temperature');
+  await hub.start();
+
+  try {
+    assert.equal(binding.read(nowMs, HOUR)?.stale, false, 'le module répond : 18,6 °C est toujours vrai');
+
+    // Le même module muet tout entier : la mesure se périme comme avant.
+    relay.capabilitiesObj.measure_co2 = { value: 498, lastUpdated: nowMs - 2 * HOUR, setable: false };
+    assert.equal(binding.read(nowMs, HOUR)?.stale, true);
+  } finally {
+    await hub.stop();
+    relay.capabilities.splice(relay.capabilities.indexOf('measure_temperature'), 1);
+    delete relay.capabilitiesObj.measure_temperature;
+    delete relay.capabilitiesObj.measure_co2;
+  }
+});

@@ -259,8 +259,14 @@ export class VThermParticipant implements Tickable {
 
   /** Ce qui a réellement été poussé sur les capabilities, pour ne pas réécrire à l'identique. */
   private readonly publishedCaps = new Map<string, CapValue>();
-  /** La CLÉ publiée, pas la phrase : comparer des phrases traduites n'aurait aucun sens. */
-  private publishedWarningKey: string | null = null;
+  /**
+   * La CLÉ publiée, pas la phrase : comparer des phrases traduites n'aurait aucun sens.
+   *
+   * `undefined` au départ, et non `null` : Homey garde l'avertissement d'un appareil d'un démarrage
+   * de l'app à l'autre. Partir de `null` revenait à croire le bandeau vide, et un « mesure
+   * périmée » d'avant le redémarrage restait affiché sur une pièce qui chauffait normalement.
+   */
+  private publishedWarningKey: string | null | undefined = undefined;
   /** Dernier avertissement du noyau, pour recomposer l'affichage hors d'un pas. */
   private coreWarning: VThermWarning | null = null;
   /** La dorsale est tombée ET la vanne est restée figée : voir `onValveBackendAvailability`. */

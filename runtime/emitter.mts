@@ -341,7 +341,13 @@ export class HomeyEmitterAdapter implements EmitterAdapter {
       ? null
       : pickSetable(summary, SWITCH_CANDIDATES);
     const localTempCapId = pickPresent(summary, LOCAL_TEMP_CANDIDATES);
-    const heatingCapId = pickPresent(summary, HEATING_CANDIDATES);
+    // `onoff` ne dit « je chauffe » que sur un appareil qui n'a rien d'autre : un relais. Sur une
+    // vanne qui accepte une consigne, c'est l'interrupteur du mode — la TRVZB StyraHem en porte un,
+    // rafraîchi une fois au pairing. Le lire comme état de chauffe rendait la demande `unknown` une
+    // fois périmé, donc aucune chaudière, et `active` à 0 % de puissance tant qu'il était frais.
+    const heatingCapId = hasSetableSetpoint(summary)
+      ? pickPresent(summary, ['running_state'])
+      : pickPresent(summary, HEATING_CANDIDATES);
     const batteryCapId = pickPresent(summary, ['measure_battery']);
     const systemModeCapId = pickSetable(summary, ['system_mode']);
 

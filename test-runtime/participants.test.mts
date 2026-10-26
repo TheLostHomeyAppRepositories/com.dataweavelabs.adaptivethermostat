@@ -254,7 +254,17 @@ test('dorsale perdue : la vanne est rendue, et rien n\'est signalé si elle l\'a
 
   assert.deepEqual(emitter.valveReleases, [60_000], 'la vanne a été reprise en main');
   assert.equal(emitter.lastValve, 100, 'elle est GRANDE OUVERTE : la pièce peut encore remonter');
-  assert.deepEqual(host.warnings, [], 'rien à signaler : le repli a fonctionné');
+  assert.equal(host.lastWarning, null, 'rien à signaler : le repli a fonctionné');
+});
+
+test('un avertissement laissé par le démarrage précédent est effacé au premier pas', async () => {
+  // Homey garde le bandeau d'un démarrage à l'autre : le premier pas ne doit pas le croire vide.
+  const { host, room, participant } = world('valve');
+  room.setReading(18, 0);
+
+  await participant.tick(0);
+
+  assert.deepEqual(host.warnings, [null], 'le « mesure périmée » d\'avant le redémarrage disparaît');
 });
 
 test('vanne restée FIGÉE : un avertissement paraît, et il disparaît au retour de la dorsale', async () => {

@@ -507,3 +507,50 @@ test('la réparation du relais met à jour le libellé « Liens » sans attendre
     'sans ça le réglage affiche « introuvable » jusqu\'au prochain démarrage de l\'app : la réparation a l\'air ratée',
   );
 });
+
+// --- Thermostat : régler une consigne l'allume --------------------------------
+
+const { default: VThermDevice } = await import('../drivers/vtherm/device.mjs');
+
+type Listener = (value: unknown) => Promise<void>;
+
+/** Un thermostat dont on capte les listeners de capability, l'interface utilisateur de Homey. */
+function thermostat(onoff: boolean): {
+  listeners: Map<string, Listener>; caps: Record<string, unknown>; setpoints: number[]; ticks: string[];
+} {
+  const app = newApp([]);
+  const ticks: string[] = [];
+  Object.assign(app, { requestTick: (reason: string) => { ticks.push(reason); } });
+  const listeners = new Map<string, Listener>();
+  const caps: Record<string, unknown> = { onoff };
+  const setpoints: number[] = [];
+  const device = withHomey(Object.create(VThermDevice.prototype) as object, app, {
+    listenersRegistered: false,
+    participant: { setManualSetpoint: (v: number) => { setpoints.push(v); } },
+    getData: () => ({ id: 'salon' }),
+    getCapabilityValue: (id: string) => caps[id],
+    setCapabilityValue: async (id: string, value: unknown) => { caps[id] = value; },
+    registerCapabilityListener: (id: string, fn: Listener) => { listeners.set(id, fn); },
+  }) as unknown as { registerListeners(): void };
+  device.registerListeners();
+  return { listeners, caps, setpoints, ticks };
+}
+
+test('régler la consigne d\'un thermostat éteint l\'allume : sinon la chaudière ne part jamais', async () => {
+  const t = thermostat(false);
+
+  await t.listeners.get('target_temperature')?.(19.5);
+
+  assert.deepEqual(t.setpoints, [19.5]);
+  assert.equal(t.caps.onoff, true, 'la pièce va réellement chauffer');
+  assert.deepEqual(t.ticks, ['salon:onoff'], 'le recalcul part sans attendre le battement suivant');
+});
+
+test('régler la consigne d\'un thermostat déjà allumé ne touche pas à `onoff`', async () => {
+  const t = thermostat(true);
+
+  await t.listeners.get('target_temperature')?.(20);
+
+  assert.equal(t.caps.onoff, true);
+  assert.deepEqual(t.ticks, []);
+});

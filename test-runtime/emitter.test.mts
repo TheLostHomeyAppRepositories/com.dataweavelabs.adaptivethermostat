@@ -89,6 +89,46 @@ test('une vanne qui expose aussi `onoff` reste une vanne : elle sait recevoir un
   assert.equal(hub.binding('target_temperature.local')?.lastWrite?.value, 19);
 });
 
+test('l\'`onoff` d\'une vanne à consigne n\'est pas un état de chauffe', async () => {
+  // La TRVZB StyraHem : son `onoff` est le mode marche/arrêt, rafraîchi au pairing puis plus jamais.
+  // Pris pour un état de chauffe, il rendait la demande `unknown` et la chaudière ne partait pas.
+  const hub = new FakeHub();
+  hub.summary = summaryOf({
+    capabilities: ['target_temperature', 'measure_temperature', 'onoff'],
+    setable: ['target_temperature', 'onoff'],
+  });
+
+  const emitter = adapter(hub);
+  await emitter.detect(0);
+
+  assert.equal(emitter.mode, 'setpoint');
+  assert.equal(emitter.caps.heatingState, false);
+  assert.equal(emitter.readHeating(0), null);
+});
+
+test('`running_state` reste l\'état de chauffe d\'une vanne à consigne', async () => {
+  const hub = new FakeHub();
+  hub.summary = summaryOf({
+    capabilities: ['target_temperature', 'running_state', 'onoff'],
+    setable: ['target_temperature', 'onoff'],
+  });
+
+  const emitter = adapter(hub);
+  await emitter.detect(0);
+
+  assert.equal(emitter.caps.heatingState, true);
+});
+
+test('l\'`onoff` d\'un relais reste son état de chauffe', async () => {
+  const hub = new FakeHub();
+  hub.summary = summaryOf({ deviceClass: 'socket', capabilities: ['onoff'], setable: ['onoff'] });
+
+  const emitter = adapter(hub);
+  await emitter.detect(0);
+
+  assert.equal(emitter.caps.heatingState, true);
+});
+
 test('la dorsale débloque le mode vanne ; sans elle on régule par consigne', async () => {
   const hub = new FakeHub();
   hub.summary = summaryOf({

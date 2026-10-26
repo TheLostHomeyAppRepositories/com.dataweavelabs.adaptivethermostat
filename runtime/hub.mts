@@ -15,7 +15,7 @@ import type Homey from 'homey';
 import { HomeyAPI } from 'homey-api';
 import { matchesCapability } from '../lib/capabilityMatch.mjs';
 
-import { computeStale, resolveTimestamp, toEpochMs } from '../lib/freshness.mjs';
+import { computeStale, deviceReportedAtMs, resolveTimestamp, toEpochMs } from '../lib/freshness.mjs';
 import { shouldWrite } from '../lib/writePolicy.mjs';
 import type { CapValue, LastWrite, WriteOptions } from '../lib/writePolicy.mjs';
 import type { Reading } from '../lib/types.mjs';
@@ -257,6 +257,7 @@ class Binding implements SourceBinding {
         // Le seuil vient de l'appelant, par nature de source. Jamais d'un seuil global ici.
         freshnessMs,
         available: device.available !== false,
+        deviceReportedAtMs: deviceReportedAtMs(device.capabilitiesObj),
       });
 
       return { value: rawValue, atMs: resolved.atMs, stale };

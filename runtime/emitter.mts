@@ -97,6 +97,16 @@ export interface EmitterAdapter {
    * parfaitement normale. C'est au participant d'en faire un avertissement visible.
    */
   readonly mismatchedHeadIds: readonly string[];
+  /**
+   * Dernier relevé remonté par l'émetteur lui-même, `null` faute de preuve. Pour un groupe, celui
+   * de la tête la plus silencieuse.
+   *
+   * Une tête qu'on peut joindre n'est pas une tête qui répond : une TRVZB du pilote Sonoff
+   * officiel restait `available`, vue sur le Zigbee à la minute, pendant que sa température
+   * restait figée depuis six semaines et que nos consignes n'y arrivaient plus. La pièce était
+   * régulée dans le vide et la chaudière tournait pour un radiateur froid.
+   */
+  readonly reportedAtMs: number | null;
   readBattery(nowMs: number): Reading<number> | null;
   /**
    * Rend la vanne neutre quand la dorsale disparaît en cours de route. `false` = elle est restée
@@ -276,6 +286,10 @@ export class HomeyEmitterAdapter implements EmitterAdapter {
 
   get available(): boolean {
     return this.summary !== null && this.summary.available;
+  }
+
+  get reportedAtMs(): number | null {
+    return this.summary?.reportedAtMs ?? null;
   }
 
   get valveUnconfirmed(): boolean {

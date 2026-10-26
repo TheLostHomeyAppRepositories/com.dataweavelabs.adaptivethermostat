@@ -314,6 +314,67 @@ test('le capteur revenu, la vanne figée prend la parole à son tour', async () 
   );
 });
 
+test('émetteur joignable mais muet depuis des semaines : un bandeau le dit', async () => {
+  // La TRVZB du salon sous le pilote Sonoff officiel : vue sur le Zigbee à la minute, température
+  // figée depuis six semaines, consignes perdues. La tuile affichait une régulation normale.
+  const { host, emitter, room, participant } = world('setpoint');
+  const nowMs = 43 * DAY_MS;
+  emitter.reportedAtMs = 0;
+  room.setReading(18, nowMs);
+
+  await participant.tick(nowMs);
+
+  assert.equal(host.lastWarning, 'device.warning.emitter_silent');
+});
+
+test('émetteur silencieux depuis quelques heures seulement : rien à signaler', async () => {
+  // Homey ne date une mesure qu'à son changement : huit heures de silence dans une pièce stable,
+  // c'est une vanne en parfaite santé.
+  const { host, emitter, room, participant } = world('setpoint');
+  const nowMs = 3 * DAY_MS;
+  emitter.reportedAtMs = nowMs - 8 * 60 * 60_000;
+  room.setReading(18, nowMs);
+
+  await participant.tick(nowMs);
+
+  assert.equal(host.lastWarning, null);
+});
+
+test('émetteur sans aucune mesure datée : pas de verdict, pas de bandeau', async () => {
+  // Un relais n'a rien à remonter : son silence n'est pas une panne.
+  const { host, emitter, room, participant } = world('switch');
+  const nowMs = 43 * DAY_MS;
+  emitter.reportedAtMs = null;
+  room.setReading(18, nowMs);
+
+  await participant.tick(nowMs);
+
+  assert.equal(host.lastWarning, null);
+});
+
+test('le bandeau de l\'émetteur muet disparaît dès qu\'il remonte une mesure', async () => {
+  const { host, emitter, room, participant } = world('setpoint');
+  emitter.reportedAtMs = 0;
+  room.setReading(18, 3 * DAY_MS);
+  await participant.tick(3 * DAY_MS);
+  assert.equal(host.lastWarning, 'device.warning.emitter_silent');
+
+  emitter.reportedAtMs = 3 * DAY_MS + 60_000;
+  room.setReading(18, 3 * DAY_MS + 120_000);
+  await participant.tick(3 * DAY_MS + 120_000);
+
+  assert.equal(host.lastWarning, null, 'la tête réappairée répond : plus rien à signaler');
+});
+
+test('capteur de pièce muet ET émetteur muet : le capteur prime', async () => {
+  const { host, emitter, participant } = world('setpoint');
+  emitter.reportedAtMs = 0;
+
+  await participant.tick(3 * DAY_MS);
+
+  assert.equal(host.lastWarning, 'device.warning.sensor_stale');
+});
+
 // --- Garde de réentrance -------------------------------------------------------
 
 test('un pas en vol n\'en laisse pas démarrer un second sur le même appareil', async () => {

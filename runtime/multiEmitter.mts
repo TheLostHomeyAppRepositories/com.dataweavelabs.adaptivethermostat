@@ -124,6 +124,14 @@ export class MultiEmitterAdapter implements EmitterAdapter {
     return this.heads.some((head) => head.available);
   }
 
+  /** Le plus ancien : une seule tête muette suffit à laisser la pièce sans chaleur. */
+  get reportedAtMs(): number | null {
+    const known = this.heads
+      .map((head) => head.reportedAtMs)
+      .filter((ms): ms is number => ms !== null);
+    return known.length === 0 ? null : Math.min(...known);
+  }
+
   get caps(): EmitterCapabilities {
     // Union : la capacité du groupe est ce qu'au moins une tête sait faire. Personne ne la lit hors
     // de l'adaptateur, mais une intersection décrirait un groupe plus pauvre que la réalité.

@@ -77,6 +77,14 @@ export const FRESHNESS = {
    */
   emitterBatteryMs: 14 * 24 * 60 * MS_PER_MINUTE,
   emitterLocalTempMs: 2 * 60 * MS_PER_MINUTE,
+  /**
+   * ~48 h sans AUCUN relevé de l'émetteur : la liaison est morte, même s'il paraît joignable.
+   *
+   * Large, parce que Homey ne date une capability qu'à son changement : une vanne saine dans une
+   * pièce stable garde sa température plusieurs heures — huit sur l'installation de référence. La
+   * panne visée, elle, se compte en semaines.
+   */
+  emitterSilentMs: 48 * 60 * MS_PER_MINUTE,
 } as const;
 
 /**
@@ -114,6 +122,13 @@ const VALVE_STUCK_WARNING_KEY = 'device.warning.valve_stuck';
  * installée par CLI ne rend même pas lisible.
  */
 const EMITTER_MISMATCH_WARNING_KEY = 'device.warning.emitter_mismatch';
+
+/**
+ * L'émetteur ne remonte plus rien depuis `FRESHNESS.emitterSilentMs`. Sans ce bandeau, la tuile
+ * affiche une régulation normale pendant que nos consignes se perdent : voir
+ * `EmitterAdapter.reportedAtMs`.
+ */
+const EMITTER_SILENT_WARNING_KEY = 'device.warning.emitter_silent';
 
 const VTHERM_STORE_KEY = 'vtherm.state';
 const BOILER_STORE_KEY = 'central.boiler';
@@ -273,6 +288,8 @@ export class VThermParticipant implements Tickable {
   private valveStuck = false;
   /** Têtes écartées du groupe au dernier pas. Relu de l'émetteur, jamais déduit ici. */
   private emitterMismatch = false;
+  /** L'émetteur n'a rien remonté depuis `FRESHNESS.emitterSilentMs`. Recalculé à chaque pas. */
+  private emitterSilent = false;
 
   /** Vrai pendant qu'un pas est en vol. Garde de réentrance, voir `tick`. */
   private ticking = false;
@@ -373,6 +390,11 @@ export class VThermParticipant implements Tickable {
 
     // APRÈS la détection, qui est ce qui fait sortir une tête du groupe ou l'y ramène.
     this.emitterMismatch = this.emitter.mismatchedHeadIds.length > 0;
+    // Pas de date, pas de verdict : un relais n'a aucune mesure à remonter.
+    const reportedAtMs = this.emitter.reportedAtMs;
+    this.emitterSilent = this.emitter.available
+      && reportedAtMs !== null
+      && nowMs - reportedAtMs > FRESHNESS.emitterSilentMs;
 
     const roomTemp = readNumber(this.sources.room, nowMs, FRESHNESS.roomTempMs);
     const inputs = this.collectInputs(roomTemp, nowMs);
@@ -498,11 +520,13 @@ export class VThermParticipant implements Tickable {
    */
   private async refreshWarning(): Promise<void> {
     // Ordre de priorité, du plus grave au moins grave. Le capteur muet passe devant : il suspend
-    // toute la régulation. Vient ensuite la tête écartée, parce qu'elle est DURABLE et invisible,
-    // là où la vanne figée accompagne une panne de dorsale que l'utilisateur constate par ailleurs.
+    // toute la régulation. Viennent ensuite l'émetteur muet puis la tête écartée, DURABLES et
+    // invisibles tous deux — le muet d'abord, il ne reçoit plus rien du tout —, là où la vanne
+    // figée accompagne une panne de dorsale que l'utilisateur constate par ailleurs.
     const core = this.coreWarning;
     let key: string | null = null;
     if (core !== null) key = WARNING_KEYS[core];
+    else if (this.emitterSilent) key = EMITTER_SILENT_WARNING_KEY;
     else if (this.emitterMismatch) key = EMITTER_MISMATCH_WARNING_KEY;
     else if (this.valveStuck) key = VALVE_STUCK_WARNING_KEY;
 

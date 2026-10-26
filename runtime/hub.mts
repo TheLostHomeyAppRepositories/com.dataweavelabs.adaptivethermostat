@@ -142,6 +142,12 @@ export interface DeviceSummary {
    * `null` quand l'API ne le donne pas — dans ce cas on ne filtre rien plutôt que de tout masquer.
    */
   driverUri: string | null;
+  /**
+   * Dernier relevé que l'appareil a remonté de lui-même, voir `deviceReportedAtMs`. `null` quand
+   * aucune capability en lecture seule n'est datée : un relais n'a rien à dire, et ce n'est pas un
+   * silence.
+   */
+  reportedAtMs: number | null;
 }
 
 export interface WriteRequest extends WriteOptions {
@@ -743,6 +749,7 @@ export class HomeyApiHub {
       setable,
       available: device.available !== false,
       driverUri: readDriverUri(device),
+      reportedAtMs: deviceReportedAtMs(device.capabilitiesObj),
     };
   }
 

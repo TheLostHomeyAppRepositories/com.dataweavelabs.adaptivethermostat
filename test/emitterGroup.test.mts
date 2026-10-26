@@ -142,24 +142,35 @@ test('la sous-capability compte autant que l\'identifiant nu', () => {
   assert.equal(hasBattery({ capabilities: ['measure_battery.valve'], setable: {} }), true);
 });
 
+const WITH_BACKEND = { valveBackend: true };
+
 test('une seule tête à pile suffit à rendre la tuile utile', () => {
   assert.deepEqual(
-    emitterExtraCapabilities([PRISE, VANNE]).sort(),
+    emitterExtraCapabilities([PRISE, VANNE], WITH_BACKEND).sort(),
     ['vtherm_emitter_battery', 'vtherm_valve_open'],
   );
 });
 
 test('un groupe de prises n\'a ni pile ni ouverture', () => {
-  assert.deepEqual(emitterExtraCapabilities([PRISE, PRISE]), []);
+  assert.deepEqual(emitterExtraCapabilities([PRISE, PRISE], WITH_BACKEND), []);
 });
 
 test('le hub muet compte comme une tête à consigne SANS pile', () => {
   assert.deepEqual(
-    emitterExtraCapabilities([null]),
+    emitterExtraCapabilities([null], WITH_BACKEND),
     ['vtherm_valve_open'],
     'supposer une pile afficherait une tuile vide sur un radiateur branché au secteur ; '
     + 'supposer l\'absence de consigne priverait d\'ouverture une vanne pilotable',
   );
+});
+
+test('sans dorsale configurée, aucune tuile d\'ouverture : l\'app n\'en commande ni n\'en lit', () => {
+  assert.deepEqual(
+    emitterExtraCapabilities([VANNE], { valveBackend: false }),
+    ['vtherm_emitter_battery'],
+    'la tuile restait figée sur la valeur d\'une dorsale débranchée depuis des mois',
+  );
+  assert.deepEqual(emitterExtraCapabilities([null], { valveBackend: false }), []);
 });
 
 // --- Homogénéité du groupe ----------------------------------------------------

@@ -554,3 +554,46 @@ test('régler la consigne d\'un thermostat déjà allumé ne touche pas à `onof
   assert.equal(t.caps.onoff, true);
   assert.deepEqual(t.ticks, []);
 });
+
+// --- Thermostat : la tuile d'ouverture suit la dorsale ---------------------------
+
+/** Un thermostat qui porte déjà la tuile d'ouverture, sur une app avec ou sans dorsale. */
+function valveTile(backend: object | null): {
+  device: { alignValveCapability(): Promise<void> }; caps: Set<string>; probed: string[];
+} {
+  const app = newApp([]);
+  const probed: string[] = [];
+  Object.assign(app, { valveBackend: backend });
+  Object.assign(app.hub, {
+    getDeviceSummary: async (id: string) => {
+      probed.push(id);
+      return { capabilities: ['target_temperature'], setable: { target_temperature: true } };
+    },
+  });
+  const caps = new Set(['vtherm_valve_open']);
+  const device = withHomey(Object.create(VThermDevice.prototype) as object, app, {
+    emitterIds: () => ['vanne-salon'],
+    hasCapability: (id: string) => caps.has(id),
+    addCapability: async (id: string) => { caps.add(id); },
+    removeCapability: async (id: string) => { caps.delete(id); },
+  }) as unknown as { alignValveCapability(): Promise<void> };
+  return { device, caps, probed };
+}
+
+test('sans dorsale configurée, la tuile d\'ouverture disparaît : elle affichait une valeur morte', async () => {
+  const t = valveTile(null);
+
+  await t.device.alignValveCapability();
+
+  assert.equal(t.caps.has('vtherm_valve_open'), false);
+});
+
+test('dorsale configurée : la tuile d\'ouverture revient', async () => {
+  const t = valveTile({ available: false });
+  t.caps.clear();
+
+  await t.device.alignValveCapability();
+
+  assert.equal(t.caps.has('vtherm_valve_open'), true, 'configurée suffit, même déconnectée');
+  assert.deepEqual(t.probed, ['vanne-salon']);
+});

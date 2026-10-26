@@ -426,6 +426,33 @@ export default class VThermDevice extends Homey.Device {
   private async migrateCapabilities(): Promise<void> {
     await this.grantCapability('vtherm_presence');
     await this.alignMotionCapability();
+    // Le retrait seul : au démarrage le hub n'a peut-être pas encore répondu, et une sonde muette
+    // compte comme une vanne — un relais y gagnerait une tuile d'ouverture.
+    if (this.app.valveBackend === null) await this.dropValveCapability();
+  }
+
+  /**
+   * L'ouverture de vanne suit la dorsale Zigbee2MQTT CONFIGURÉE, dans les deux sens. Appelée par
+   * l'app quand ce réglage change.
+   *
+   * La seule tuile d'émetteur qu'on retire, et le retrait coûte son historique Insights. Mais sans
+   * dorsale, l'app ne commande ni ne lit aucune ouverture : la tuile restait figée sur la dernière
+   * valeur, des mois plus tôt, et passait pour l'état réel d'une vanne en réalité fermée. Une
+   * courbe qui ne bouge plus ne vaut pas une tuile qui ment.
+   */
+  async alignValveCapability(): Promise<void> {
+    if (this.app.valveBackend === null) {
+      await this.dropValveCapability();
+      return;
+    }
+    await this.grantEmitterCapabilities(this.emitterIds());
+  }
+
+  private async dropValveCapability(): Promise<void> {
+    if (!this.hasCapability('vtherm_valve_open')) return;
+    await this.removeCapability('vtherm_valve_open').catch((err: unknown) => {
+      this.error('Retrait de la capability vtherm_valve_open :', err);
+    });
   }
 
   /** Appelée aussi à la re-liaison : un capteur lié ou délié par réparation change la tuile. */
@@ -822,7 +849,8 @@ export default class VThermDevice extends Homey.Device {
   }
 
   /**
-   * Ajoute les tuiles que le nouveau groupe rend utiles. N'en RETIRE jamais aucune.
+   * Ajoute les tuiles que le nouveau groupe rend utiles. N'en RETIRE jamais aucune — l'ouverture
+   * sans dorsale mise à part, voir `alignValveCapability`.
    *
    * L'asymétrie est le fond du sujet. `removeCapability` détruit l'historique Insights de la
    * capability retirée : une tête débranchée coûterait la courbe d'ouverture de tout l'hiver, pour
@@ -836,7 +864,8 @@ export default class VThermDevice extends Homey.Device {
   private async grantEmitterCapabilities(ids: readonly string[]): Promise<void> {
     const probes = await Promise.all(ids.map(async (id) => this.probe(id)));
 
-    for (const capabilityId of emitterExtraCapabilities(probes)) {
+    const options = { valveBackend: this.app.valveBackend !== null };
+    for (const capabilityId of emitterExtraCapabilities(probes, options)) {
       await this.grantCapability(capabilityId);
     }
   }

@@ -180,13 +180,21 @@ export function hasBattery(probe: EmitterProbe): boolean {
  * repli historique, et c'est le bon sens des deux côtés. Supposer une pile ferait apparaître une
  * tuile perpétuellement vide sur un radiateur branché au secteur ; supposer l'absence de consigne
  * priverait d'ouverture une vanne parfaitement pilotable.
+ *
+ * L'ouverture exige en plus une dorsale Zigbee2MQTT CONFIGURÉE : sans elle l'app régule par
+ * consigne, ne commande aucune ouverture et ne peut en lire aucune. La tuile restait figée sur la
+ * dernière valeur d'une dorsale débranchée depuis des mois, et passait pour l'état réel de la
+ * vanne. Configurée, et non connectée : une coupure passagère ne doit rien changer aux tuiles.
  */
 export function emitterExtraCapabilities(
   probes: ReadonlyArray<EmitterProbe | null>,
+  options: { valveBackend: boolean },
 ): string[] {
   const out: string[] = [];
   if (probes.some((p) => p !== null && hasBattery(p))) out.push('vtherm_emitter_battery');
-  if (probes.some((p) => p === null || hasWritableSetpoint(p))) out.push('vtherm_valve_open');
+  if (options.valveBackend && probes.some((p) => p === null || hasWritableSetpoint(p))) {
+    out.push('vtherm_valve_open');
+  }
   return out;
 }
 

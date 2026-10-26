@@ -27,6 +27,7 @@ import { HomeyApiHub } from './runtime/hub.mjs';
 import { Scheduler, type Tickable } from './runtime/scheduler.mjs';
 import type { CentralParticipant, VThermParticipant } from './runtime/participants.mjs';
 import type { ValveBackend } from './runtime/valveBackend.mjs';
+import type VThermDevice from './drivers/vtherm/device.mjs';
 import { MqttValveBackend } from './runtime/mqttBackend.mjs';
 import { extractDeviceHint, validateBrokerConfig, type BrokerConfig } from './lib/mqttPayload.mjs';
 import { BROKER_SETTINGS } from './api.mjs';
@@ -215,9 +216,28 @@ export default class VThermApp extends Homey.App {
    * consigne décalée sans que rien d'autre ne change.
    */
   setValveBackend(backend: ValveBackend | null): void {
+    const configurationChanged = (this.valveBackendImpl === null) !== (backend === null);
     this.valveBackendImpl = backend;
     for (const participant of this.vtherms.values()) {
       participant.setValveBackend(backend);
+    }
+    // Branchée ou débranchée dans les RÉGLAGES — une coupure de connexion ne passe pas par ici :
+    // la tuile d'ouverture n'a de sens qu'avec une dorsale.
+    if (configurationChanged) void this.alignValveCapabilities();
+  }
+
+  private async alignValveCapabilities(): Promise<void> {
+    let devices: Homey.Device[];
+    try {
+      devices = this.homey.drivers.getDriver('vtherm').getDevices();
+    } catch {
+      // Driver pas encore prêt, au démarrage : chaque appareil s'aligne lui-même à son `onInit`.
+      return;
+    }
+    for (const device of devices) {
+      await (device as VThermDevice).alignValveCapability().catch((err: unknown) => {
+        this.error('Alignement de la tuile d\'ouverture :', err);
+      });
     }
   }
 

@@ -107,6 +107,11 @@ export interface EmitterAdapter {
    * régulée dans le vide et la chaudière tournait pour un radiateur froid.
    */
   readonly reportedAtMs: number | null;
+  /**
+   * Pendant du précédent pour la DEMANDE : le relevé le plus récent, toutes têtes confondues.
+   * Une tête morte dans un groupe ne doit pas priver de chaudière les radiateurs qui répondent.
+   */
+  readonly newestReportedAtMs: number | null;
   readBattery(nowMs: number): Reading<number> | null;
   /**
    * Rend la vanne neutre quand la dorsale disparaît en cours de route. `false` = elle est restée
@@ -290,6 +295,10 @@ export class HomeyEmitterAdapter implements EmitterAdapter {
 
   get reportedAtMs(): number | null {
     return this.summary?.reportedAtMs ?? null;
+  }
+
+  get newestReportedAtMs(): number | null {
+    return this.reportedAtMs;
   }
 
   get valveUnconfirmed(): boolean {

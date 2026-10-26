@@ -146,7 +146,7 @@
       "sensor_stale_safety": "De kamertemperatuurmeting is verouderd. De veiligheidsmodus houdt een terugval aan tot de sensor terugkomt, daarna geeft hij op.",
       "valve_stuck": "De Zigbee2MQTT-verbinding is weggevallen en de klep bleef op zijn laatste opening staan: de kamer verwarmt mogelijk niet, ongeacht het instelpunt. De regeling gaat verder via het instelpunt.",
       "emitter_mismatch": "Een van de verwarmingen in deze kamer wordt niet meer aangestuurd: hij kwam terug met een ander soort besturing en blijft staan waar hij het laatst stond. De kamer verwarmt op een fractie van zijn vermogen totdat hij terugkeert of u de thermostaat repareert.",
-      "emitter_silent": "De verwarming van deze kamer heeft al meer dan twee dagen geen enkele meting doorgegeven, hoewel ze bereikbaar lijkt: de ingestelde temperaturen van de app komen er waarschijnlijk niet meer aan. Koppel haar opnieuw en repareer daarna deze thermostaat om haar weer te verbinden."
+      "emitter_silent": "De verwarming van deze kamer heeft al meer dan twee dagen geen enkele meting doorgegeven, hoewel ze bereikbaar lijkt: de ingestelde temperaturen van de app komen er waarschijnlijk niet meer aan. De ketel wordt voor deze kamer niet meer aangestuurd. Koppel haar opnieuw en repareer daarna deze thermostaat om haar weer te verbinden."
     }
   },
   "flow": {

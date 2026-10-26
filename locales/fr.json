@@ -146,7 +146,7 @@
       "sensor_stale_safety": "Mesure de température de pièce périmée. Le mode sécurité maintient un repli de chauffe jusqu'au retour du capteur, puis il abandonne.",
       "valve_stuck": "La dorsale Zigbee2MQTT a disparu et la vanne est restée sur sa dernière ouverture : la pièce peut ne pas chauffer, quelle que soit la consigne. La régulation continue par consigne.",
       "emitter_mismatch": "Un des émetteurs de cette pièce n'est plus piloté : il est revenu en annonçant un autre type de commande, et il reste là où on l'a laissé. La pièce chauffera à une fraction de sa puissance tant qu'il n'est pas revenu ou que vous n'avez pas réparé le thermostat.",
-      "emitter_silent": "L'émetteur de cette pièce ne remonte plus aucune mesure depuis plus de deux jours, alors qu'il paraît joignable : les consignes de l'app ne lui parviennent sans doute plus. Réappairez-le, puis réparez ce thermostat pour le relier à nouveau."
+      "emitter_silent": "L'émetteur de cette pièce ne remonte plus aucune mesure depuis plus de deux jours, alors qu'il paraît joignable : les consignes de l'app ne lui parviennent sans doute plus. La chaudière n'est plus sollicitée pour cette pièce. Réappairez-le, puis réparez ce thermostat pour le relier à nouveau."
     }
   },
   "flow": {

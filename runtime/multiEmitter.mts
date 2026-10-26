@@ -126,10 +126,18 @@ export class MultiEmitterAdapter implements EmitterAdapter {
 
   /** Le plus ancien : une seule tête muette suffit à laisser la pièce sans chaleur. */
   get reportedAtMs(): number | null {
-    const known = this.heads
-      .map((head) => head.reportedAtMs)
-      .filter((ms): ms is number => ms !== null);
+    const known = this.knownReports((head) => head.reportedAtMs);
     return known.length === 0 ? null : Math.min(...known);
+  }
+
+  /** Le plus récent : tant qu'une tête répond, la pièce peut encore chauffer. */
+  get newestReportedAtMs(): number | null {
+    const known = this.knownReports((head) => head.newestReportedAtMs);
+    return known.length === 0 ? null : Math.max(...known);
+  }
+
+  private knownReports(read: (head: EmitterAdapter) => number | null): number[] {
+    return this.heads.map(read).filter((ms): ms is number => ms !== null);
   }
 
   get caps(): EmitterCapabilities {

@@ -366,6 +366,32 @@ test('le bandeau de l\'émetteur muet disparaît dès qu\'il remonte une mesure'
   assert.equal(host.lastWarning, null, 'la tête réappairée répond : plus rien à signaler');
 });
 
+test('émetteur muet : la chaudière n\'est plus sollicitée pour un radiateur qui ne reçoit rien', async () => {
+  // Pièce à 12 °C, puissance saturée : sans la garde, la demande serait `active`.
+  const { emitter, room, participant } = world('setpoint');
+  const nowMs = 43 * DAY_MS;
+  emitter.reportedAtMs = 0;
+  emitter.newestReportedAtMs = 0;
+  room.setReading(12, nowMs);
+
+  await participant.tick(nowMs);
+
+  assert.equal(participant.demand.kind, 'unknown');
+});
+
+test('une tête muette dans un groupe qui répond : la pièce garde sa demande, le bandeau prévient', async () => {
+  const { host, emitter, room, participant } = world('setpoint');
+  const nowMs = 43 * DAY_MS;
+  emitter.reportedAtMs = 0;
+  emitter.newestReportedAtMs = nowMs - 60_000;
+  room.setReading(12, nowMs);
+
+  await participant.tick(nowMs);
+
+  assert.equal(participant.demand.kind, 'active', 'les autres radiateurs ont besoin de la chaudière');
+  assert.equal(host.lastWarning, 'device.warning.emitter_silent');
+});
+
 test('capteur de pièce muet ET émetteur muet : le capteur prime', async () => {
   const { host, emitter, participant } = world('setpoint');
   emitter.reportedAtMs = 0;

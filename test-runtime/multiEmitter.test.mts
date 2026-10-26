@@ -76,6 +76,7 @@ class FakeHead implements EmitterAdapter {
   readonly headCount = 1;
   readonly mismatchedHeadIds: readonly string[] = [];
   reportedAtMs: number | null = null;
+  newestReportedAtMs: number | null = null;
 
   readHeatingHeads(): readonly (Reading<boolean> | null)[] { return [this.heating]; }
 
@@ -470,4 +471,17 @@ test('la libération de vanne couvre les têtes écartées, et le dit quand l\'u
 
 test('un émetteur seul n\'a aucune tête écartée à signaler', () => {
   assert.deepEqual(new FakeHead({ id: 'a' }).mismatchedHeadIds, []);
+});
+
+test('relevés d\'un groupe : le plus ancien pour le bandeau, le plus récent pour la demande', () => {
+  const a = new FakeHead({ id: 'a' });
+  const b = new FakeHead({ id: 'b' });
+  const c = new FakeHead({ id: 'c' });
+  a.reportedAtMs = 1_000; a.newestReportedAtMs = 1_000;
+  b.reportedAtMs = 5_000; b.newestReportedAtMs = 5_000;
+  const g = group([a, b, c]);
+
+  assert.equal(g.reportedAtMs, 1_000, 'une tête muette suffit à prévenir');
+  assert.equal(g.newestReportedAtMs, 5_000, 'une tête qui répond suffit à chauffer');
+  assert.equal(group([c]).newestReportedAtMs, null, 'aucune date, aucun verdict');
 });

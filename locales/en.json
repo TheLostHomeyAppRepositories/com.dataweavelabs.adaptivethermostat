@@ -146,7 +146,7 @@
       "sensor_stale_safety": "The room temperature reading is stale. Safety mode holds a fallback heating level until the sensor comes back, then it gives up.",
       "valve_stuck": "The Zigbee2MQTT backbone went away and the valve stayed at its last opening: the room may not heat whatever the setpoint says. Regulation continues by setpoint.",
       "emitter_mismatch": "One of this room's heaters is no longer being driven: it came back reporting a different kind of control, and it is now sitting wherever it was last left. The room will heat at a fraction of its power until it returns or you repair the thermostat.",
-      "emitter_silent": "This room's heater has not reported a single reading for more than two days, although it still looks reachable: the app's setpoints are probably no longer reaching it. Re-pair it, then repair this thermostat to link it again."
+      "emitter_silent": "This room's heater has not reported a single reading for more than two days, although it still looks reachable: the app's setpoints are probably no longer reaching it. The boiler is no longer started for this room. Re-pair it, then repair this thermostat to link it again."
     }
   },
   "flow": {

@@ -290,6 +290,8 @@ export class VThermParticipant implements Tickable {
   private emitterMismatch = false;
   /** L'émetteur n'a rien remonté depuis `FRESHNESS.emitterSilentMs`. Recalculé à chaque pas. */
   private emitterSilent = false;
+  /** Plus AUCUNE tête ne répond : la demande de cette pièce ne vaut plus rien. */
+  private emitterAllSilent = false;
 
   /** Vrai pendant qu'un pas est en vol. Garde de réentrance, voir `tick`. */
   private ticking = false;
@@ -391,10 +393,11 @@ export class VThermParticipant implements Tickable {
     // APRÈS la détection, qui est ce qui fait sortir une tête du groupe ou l'y ramène.
     this.emitterMismatch = this.emitter.mismatchedHeadIds.length > 0;
     // Pas de date, pas de verdict : un relais n'a aucune mesure à remonter.
-    const reportedAtMs = this.emitter.reportedAtMs;
-    this.emitterSilent = this.emitter.available
-      && reportedAtMs !== null
-      && nowMs - reportedAtMs > FRESHNESS.emitterSilentMs;
+    const silentSince = (atMs: number | null): boolean => this.emitter.available
+      && atMs !== null
+      && nowMs - atMs > FRESHNESS.emitterSilentMs;
+    this.emitterSilent = silentSince(this.emitter.reportedAtMs);
+    this.emitterAllSilent = silentSince(this.emitter.newestReportedAtMs);
 
     const roomTemp = readNumber(this.sources.room, nowMs, FRESHNESS.roomTempMs);
     const inputs = this.collectInputs(roomTemp, nowMs);
@@ -556,6 +559,12 @@ export class VThermParticipant implements Tickable {
     // rend `null` sur une liaison orpheline. Les deux autres commandent à l'aveugle — le mode vanne
     // par la dorsale, le mode interrupteur par notre propre découpage temporel — et doivent donc
     // dire quand rien n'est parti.
+    //
+    // L'émetteur muet est le même doute, en plus durable : rien ne dit que nos commandes arrivent.
+    // La tête du salon, sous le pilote Sonoff officiel, faisait tourner la chaudière pour un
+    // radiateur froid depuis des semaines. Seulement quand TOUTES les têtes se taisent : une tête
+    // morte dans un groupe ne doit pas laisser les autres radiateurs sans eau chaude.
+    if (this.emitterAllSilent) return { kind: 'unknown' };
     if (this.emitter.mode === 'valve' && this.emitter.valveUnconfirmed) return { kind: 'unknown' };
     if (this.emitter.mode === 'switch' && this.emitter.switchUnconfirmed) return { kind: 'unknown' };
     return demand;

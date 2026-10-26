@@ -55,6 +55,7 @@ export function summaryOf(options: {
   setable?: readonly string[];
   available?: boolean;
   driverUri?: string | null;
+  reportedAtMs?: number | null;
 }): DeviceSummary {
   const setable: Record<string, boolean> = {};
   for (const id of options.capabilities) {
@@ -69,5 +70,6 @@ export function summaryOf(options: {
     setable,
     available: options.available ?? true,
     driverUri: options.driverUri ?? 'homey:app:com.tiers:device',
+    reportedAtMs: options.reportedAtMs ?? null,
   };
 }

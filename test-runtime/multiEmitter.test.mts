@@ -75,6 +75,7 @@ class FakeHead implements EmitterAdapter {
   async applyValve(p: number): Promise<void> { await this.record('valve', `valve:${p}`); }
   readonly headCount = 1;
   readonly mismatchedHeadIds: readonly string[] = [];
+  reportedAtMs: number | null = null;
 
   readHeatingHeads(): readonly (Reading<boolean> | null)[] { return [this.heating]; }
 

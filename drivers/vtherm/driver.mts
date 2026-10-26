@@ -264,6 +264,8 @@ export default class VThermDriver extends Homey.Driver {
    *
    * Elles ne sont jamais RETIRÉES : `removeCapability` détruit l'historique Insights de la
    * capability, et une tuile devenue vide coûte infiniment moins cher qu'une courbe d'hiver perdue.
+   * Une seule exception, l'ouverture de vanne sans dorsale configurée : voir
+   * `alignValveCapability` dans `device.mts`.
    *
    * Elles peuvent en revanche être AJOUTÉES après coup, et l'asymétrie est délibérée : sur une
    * capability absente il n'y a pas d'historique à perdre. C'est ce qui permet à un thermostat créé
@@ -314,7 +316,9 @@ export default class VThermDriver extends Homey.Driver {
     const probes = await Promise.all(
       emitterIds.map(async (id) => this.app.hub.getDeviceSummary(id)),
     );
-    capabilities.push(...emitterExtraCapabilities(probes));
+    capabilities.push(...emitterExtraCapabilities(probes, {
+      valveBackend: this.app.valveBackend !== null,
+    }));
 
     // Un contact choisi à cette étape doit servir dès la création : le réglage « Détection » part
     // sinon de `off`, et la fenêtre ouverte chaufferait sans que rien ne l'indique.

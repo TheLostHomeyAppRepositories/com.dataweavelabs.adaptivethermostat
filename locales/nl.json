@@ -40,6 +40,7 @@
     "finish": "Thermostaat aanmaken",
     "creating": "Aanmaken…",
     "updated": "Wijziging opgeslagen.",
+    "missing_emitter": "Apparaat niet gevonden — vink het uit om het te verwijderen",
     "done": "Klaar",
     "edit": {
       "title": "Bronnen van deze thermostaat",

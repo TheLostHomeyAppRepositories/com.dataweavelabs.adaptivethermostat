@@ -320,3 +320,17 @@ test('les vues connaissent la MÊME borne d\'émetteurs que le noyau', () => {
     );
   }
 });
+
+/**
+ * Une tête supprimée de Homey n'est plus candidate, mais reste dans le groupe.
+ *
+ * La vue n'affichait que les candidates : la tête disparue ne se décochait donc pas, et chaque clic
+ * la renvoyait avec le groupe entier. Quatre thermostats ont gardé leurs anciennes têtes après des
+ * réparations faites dans les règles.
+ */
+test('la page d\'édition montre les têtes disparues, pour qu\'on puisse les décocher', () => {
+  const source = readFileSync(join(process.cwd(), 'drivers/vtherm/repair/edit_sources.html'), 'utf8');
+
+  assert.match(source, /EMITTERS\.forEach\(function \(id\) \{\s*if \(known\.indexOf\(id\) >= 0\) return;/);
+  assert.ok(source.includes("label('pair.missing_emitter'"), 'la ligne dit pourquoi elle est là');
+});

@@ -40,6 +40,7 @@
     "finish": "Create the thermostat",
     "creating": "Creating…",
     "updated": "Change saved.",
+    "missing_emitter": "Device not found — untick it to remove it",
     "done": "Done",
     "edit": {
       "title": "Sources of this thermostat",

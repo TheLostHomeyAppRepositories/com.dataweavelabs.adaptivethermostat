@@ -210,6 +210,17 @@
       root.innerHTML = '';
       var ul = document.createElement('ul');
       var all = (devices || []).slice();
+      // Une tête supprimée de Homey reste dans le groupe, mais n'est plus candidate : sans cette
+      // ligne elle ne s'affichait pas, donc ne se décochait pas, et chaque clic la renvoyait avec
+      // le groupe entier. « Réparer » ne pouvait pas réparer. Seulement si la liste est arrivée :
+      // vide sur un hub muet, elle ferait passer toutes les têtes pour disparues.
+      if (slot.multi && all.length > 0) {
+        var known = all.map(function (d) { return d.id; });
+        EMITTERS.forEach(function (id) {
+          if (known.indexOf(id) >= 0) return;
+          all.push({ id: id, name: label('pair.missing_emitter', 'Device not found — untick it to remove it'), zoneName: null });
+        });
+      }
       if (!slot.required) {
         all.unshift({ id: null, name: label('pair.optional.none', 'None'), zoneName: null });
       }

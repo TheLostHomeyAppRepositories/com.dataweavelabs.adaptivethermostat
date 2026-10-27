@@ -40,6 +40,7 @@
     "finish": "Créer le thermostat",
     "creating": "Création…",
     "updated": "Modification enregistrée.",
+    "missing_emitter": "Appareil introuvable — décochez-le pour le retirer",
     "done": "Terminé",
     "edit": {
       "title": "Sources de ce thermostat",

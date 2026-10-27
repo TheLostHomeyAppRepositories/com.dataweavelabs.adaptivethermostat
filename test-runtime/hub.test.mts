@@ -280,3 +280,30 @@ test('une température stable reste fraîche tant que l\'appareil remonte autre 
     delete relay.capabilitiesObj.measure_co2;
   }
 });
+
+test('un capteur qui ne remonte que sa température reste frais tant que Homey le voit', async () => {
+  // Le détecteur de fumée frient de la cuisine : aucune autre mesure ne bouge, seul `lastSeenAt`
+  // témoigne qu'il parle encore.
+  const MINUTE = 60_000;
+  const nowMs = 10 * 60 * MINUTE;
+  relay.capabilities.push('measure_temperature');
+  relay.capabilitiesObj.measure_temperature = { value: 18.6, lastUpdated: nowMs - 95 * MINUTE, setable: false };
+  const device = relay as unknown as { lastSeenAt?: unknown };
+  device.lastSeenAt = new Date(nowMs - 5 * MINUTE);
+
+  const hub = newHub();
+  const binding = hub.bind(relay.id, 'measure_temperature');
+  await hub.start();
+
+  try {
+    assert.equal(binding.read(nowMs, 60 * MINUTE)?.stale, false);
+
+    device.lastSeenAt = new Date(nowMs - 2 * 60 * MINUTE);
+    assert.equal(binding.read(nowMs, 60 * MINUTE)?.stale, true, 'plus vu non plus : périmé');
+  } finally {
+    await hub.stop();
+    delete device.lastSeenAt;
+    relay.capabilities.splice(relay.capabilities.indexOf('measure_temperature'), 1);
+    delete relay.capabilitiesObj.measure_temperature;
+  }
+});

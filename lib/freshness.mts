@@ -90,7 +90,26 @@ export interface StaleInput {
    * de la mesure compte.
    */
   deviceReportedAtMs?: number | null;
+  /**
+   * `device.lastSeenAt` : le dernier message reçu de l'appareil, quel qu'il soit. Voir
+   * `SEEN_STABLE_MAX_MS` pour ce qu'il autorise, et surtout pour ce qu'il n'autorise pas.
+   */
+  deviceSeenAtMs?: number | null;
 }
+
+/**
+ * Âge maximal d'une mesure inchangée sur un appareil que Homey voit encore.
+ *
+ * Un détecteur de fumée frient ne remonte que sa température, et Homey ne la date qu'à son
+ * changement : 95 minutes à 18,6 °C dans une cuisine stable suffisaient à suspendre la pièce,
+ * alors que l'appareil avait parlé cinq minutes plus tôt. Rien d'autre que `lastSeenAt` ne pouvait
+ * en témoigner.
+ *
+ * Borné, parce que `lastSeenAt` prouve qu'un appareil est joignable, pas que sa mesure est vraie :
+ * une TRVZB sous le pilote Sonoff officiel était vue à la minute avec une température figée depuis
+ * six semaines. Au-delà de six heures, une valeur qui ne bouge pas n'est plus crue, vue ou non.
+ */
+export const SEEN_STABLE_MAX_MS = 6 * 60 * 60_000;
 
 /** Ce que `deviceReportedAtMs` lit de chaque capability d'un appareil. */
 export interface ReportedCapability {
@@ -127,7 +146,10 @@ export function deviceReportedAtMs(
 
 /** Vrai quand la lecture ne doit plus être crue. */
 export function computeStale(input: StaleInput): boolean {
-  const { atMs, nowMs, freshnessMs, available, deviceReportedAtMs: reportedAtMs = null } = input;
+  const {
+    atMs, nowMs, freshnessMs, available,
+    deviceReportedAtMs: reportedAtMs = null, deviceSeenAtMs: seenAtMs = null,
+  } = input;
 
   // Règle non négociable : indisponible ⇒ périmé, même horodaté à l'instant.
   if (!available) return true;
@@ -143,6 +165,10 @@ export function computeStale(input: StaleInput): boolean {
 
   // Un horodatage dans le futur (dérive d'horloge de l'émetteur) n'est pas une raison de périmer.
   const ageMs = Math.max(0, nowMs - lastSeenMs);
+  if (ageMs <= freshnessMs) return false;
 
-  return ageMs > freshnessMs;
+  // Vu dans le délai de fraîcheur : la mesure inchangée reste vraie, jusqu'à `SEEN_STABLE_MAX_MS`.
+  const seenRecently = seenAtMs !== null && Number.isFinite(seenAtMs)
+    && nowMs - seenAtMs <= freshnessMs;
+  return !(seenRecently && ageMs <= SEEN_STABLE_MAX_MS);
 }

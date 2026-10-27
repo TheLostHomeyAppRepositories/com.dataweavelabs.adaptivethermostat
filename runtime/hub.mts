@@ -87,6 +87,8 @@ interface ApiDevice {
   capabilities: string[];
   capabilitiesObj: Record<string, ApiCapabilityObj | undefined> | null;
   available: boolean;
+  /** Dernier message reçu de l'appareil. Rafraîchi par `refresh()`, voir `SEEN_STABLE_MAX_MS`. */
+  lastSeenAt?: unknown;
   makeCapabilityInstance(
     capabilityId: string,
     listener: (value: CapValue | null) => void,
@@ -264,6 +266,7 @@ class Binding implements SourceBinding {
         freshnessMs,
         available: device.available !== false,
         deviceReportedAtMs: deviceReportedAtMs(device.capabilitiesObj),
+        deviceSeenAtMs: toEpochMs(device.lastSeenAt),
       });
 
       return { value: rawValue, atMs: resolved.atMs, stale };

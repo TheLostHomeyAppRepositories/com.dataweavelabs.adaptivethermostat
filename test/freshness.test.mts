@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeStale, deviceReportedAtMs, resolveTimestamp, toEpochMs } from '../lib/freshness.mjs';
+import {
+  SEEN_STABLE_MAX_MS, computeStale, deviceReportedAtMs, resolveTimestamp, toEpochMs,
+} from '../lib/freshness.mjs';
 import type { TimestampCandidates } from '../lib/freshness.mjs';
 
 const MINUTE = 60_000;
@@ -135,6 +137,51 @@ test('un signe de vie plus ancien que la mesure ne la vieillit pas', () => {
 
 test('appareil muet tout entier : la mesure se périme comme avant', () => {
   const stale = computeStale({ atMs: 0, nowMs: 90 * MINUTE, freshnessMs: 60 * MINUTE, available: true, deviceReportedAtMs: 5 * MINUTE });
+  assert.equal(stale, true);
+});
+
+// --- deviceSeenAtMs ----------------------------------------------------------
+
+test('détecteur frient vu il y a 5 min, 18,6 °C inchangé depuis 95 min : la mesure reste vraie', () => {
+  const nowMs = 10 * 60 * MINUTE;
+  const stale = computeStale({
+    atMs: nowMs - 95 * MINUTE, nowMs, freshnessMs: 60 * MINUTE, available: true,
+    deviceReportedAtMs: nowMs - 95 * MINUTE, deviceSeenAtMs: nowMs - 5 * MINUTE,
+  });
+  assert.equal(stale, false);
+});
+
+test('vu à la minute mais figé depuis six semaines : périmé quand même', () => {
+  // La TRVZB du pilote Sonoff officiel : joignable, et morte.
+  const nowMs = 43 * 24 * 60 * MINUTE;
+  const stale = computeStale({
+    atMs: 0, nowMs, freshnessMs: 60 * MINUTE, available: true, deviceSeenAtMs: nowMs - MINUTE,
+  });
+  assert.equal(stale, true);
+});
+
+test('la grâce de `lastSeenAt` s\'arrête net à six heures', () => {
+  const nowMs = 24 * 60 * MINUTE;
+  const at = (ageMs: number): boolean => computeStale({
+    atMs: nowMs - ageMs, nowMs, freshnessMs: 60 * MINUTE, available: true, deviceSeenAtMs: nowMs,
+  });
+  assert.equal(at(SEEN_STABLE_MAX_MS), false);
+  assert.equal(at(SEEN_STABLE_MAX_MS + 1), true);
+});
+
+test('un appareil qui n\'a pas été vu récemment n\'obtient aucune grâce', () => {
+  const nowMs = 10 * 60 * MINUTE;
+  const stale = computeStale({
+    atMs: nowMs - 95 * MINUTE, nowMs, freshnessMs: 60 * MINUTE, available: true,
+    deviceSeenAtMs: nowMs - 90 * MINUTE,
+  });
+  assert.equal(stale, true);
+});
+
+test('vu récemment mais indisponible : périmé', () => {
+  const stale = computeStale({
+    atMs: 0, nowMs: 90 * MINUTE, freshnessMs: 60 * MINUTE, available: false, deviceSeenAtMs: 90 * MINUTE,
+  });
   assert.equal(stale, true);
 });
 

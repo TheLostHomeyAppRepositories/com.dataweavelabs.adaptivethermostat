@@ -401,6 +401,29 @@ test('capteur de pièce muet ET émetteur muet : le capteur prime', async () => 
   assert.equal(host.lastWarning, 'device.warning.sensor_stale');
 });
 
+test('mode consigne : sans nouvelle consigne, la tête est contrôlée à chaque pas', async () => {
+  const { emitter, room, participant } = world('setpoint');
+  room.setReading(19, 0);
+  await participant.tick(0);
+  const writes = emitter.setpoints.length;
+
+  room.setReading(19, 60_000);
+  await participant.tick(60_000);
+
+  assert.equal(emitter.setpoints.length, writes, 'consigne inchangée : le noyau n\'écrit rien');
+  assert.deepEqual(emitter.reasserts.slice(-1), [60_000], 'mais la tête est vérifiée');
+});
+
+test('mode vanne : la consigne n\'est qu\'un affichage, rien à réaffirmer', async () => {
+  const { emitter, room, participant } = world('valve');
+  room.setReading(19, 0);
+  await participant.tick(0);
+  room.setReading(19, 60_000);
+  await participant.tick(60_000);
+
+  assert.deepEqual(emitter.reasserts, []);
+});
+
 // --- Garde de réentrance -------------------------------------------------------
 
 test('un pas en vol n\'en laisse pas démarrer un second sur le même appareil', async () => {

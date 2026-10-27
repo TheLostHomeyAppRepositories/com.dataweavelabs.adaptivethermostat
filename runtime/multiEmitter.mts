@@ -175,6 +175,15 @@ export class MultiEmitterAdapter implements EmitterAdapter {
     await this.fanOut('consigne', (head) => head.applySetpoint(value, nowMs));
   }
 
+  /** Tête par tête : chacune a sa propre dernière écriture et sa propre dérive. */
+  async reassertSetpoint(nowMs: number): Promise<boolean> {
+    let any = false;
+    await this.fanOut('réaffirmation de consigne', async (head) => {
+      if (await head.reassertSetpoint(nowMs)) any = true;
+    });
+    return any;
+  }
+
   async applyValve(percent: number, nowMs: number): Promise<void> {
     await this.fanOut('ouverture de vanne', (head) => head.applyValve(percent, nowMs));
   }

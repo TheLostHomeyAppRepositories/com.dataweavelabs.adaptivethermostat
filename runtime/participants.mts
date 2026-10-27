@@ -487,6 +487,14 @@ export class VThermParticipant implements Tickable {
     if (setpointToEmitter !== null) {
       await this.safely('écriture de la consigne', () =>
         this.emitter.applySetpoint(setpointToEmitter, nowMs));
+    } else if (this.emitter.mode === 'setpoint') {
+      // Rien de neuf à envoyer, mais la tête porte peut-être autre chose : en mode consigne, c'est
+      // elle qui commande. Voir `EmitterAdapter.reassertSetpoint`.
+      await this.safely('réaffirmation de la consigne', async () => {
+        if (await this.emitter.reassertSetpoint(nowMs)) {
+          this.host.log('Consigne de l\'émetteur divergente : réécrite.');
+        }
+      });
     }
 
     // `null` = le noyau n'a rien à commander : soit les relais sont déjà dans le bon état, soit la

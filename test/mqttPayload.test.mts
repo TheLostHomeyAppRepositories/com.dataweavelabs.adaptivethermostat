@@ -13,6 +13,7 @@ import {
   buildSensorSelectPayload,
   buildSetTopic,
   buildValvePayload,
+  buildValveReleasePayload,
   clampCalibration,
   clampExternalTemperature,
   clampValveOpening,
@@ -405,4 +406,11 @@ test('une adresse propre reste acceptée', () => {
     validateBrokerConfig({ host: 'mqtts://broker.local:8883', port: 1883, baseTopic: 'zigbee2mqtt' }),
     null,
   );
+});
+
+test('libération : jamais une fermeture à 0 %, qui laisserait la vanne ouverte pour toujours', () => {
+  assert.deepEqual(buildValveReleasePayload(), {
+    valve_opening_degree: 100,
+    valve_closing_degree: 100,
+  });
 });

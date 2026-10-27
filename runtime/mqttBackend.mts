@@ -37,6 +37,7 @@ import {
   buildSensorSelectPayload,
   buildSetTopic,
   buildValvePayload,
+  buildValveReleasePayload,
   parseBridgeDevices,
   resolveFriendlyName,
   validateBrokerConfig,
@@ -432,6 +433,10 @@ export class MqttValveBackend implements ValveBackend {
   async setValveOpening(deviceId: string, percent: number): Promise<boolean> {
     // Ouverture ET fermeture en un seul message (SPEC §5.5) : ces vannes sont sur piles.
     return this.publish(deviceId, buildValvePayload(percent), 'valve_opening_degree');
+  }
+
+  async releaseValve(deviceId: string): Promise<boolean> {
+    return this.publish(deviceId, buildValveReleasePayload(), 'valve_opening_degree');
   }
 
   async setExternalTemperature(deviceId: string, celsius: number): Promise<boolean> {

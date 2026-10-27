@@ -639,7 +639,8 @@ export class HomeyEmitterAdapter implements EmitterAdapter {
   }
 
   /**
-   * Rend la vanne à un état neutre — ouverture 100 %, thermomètre interne, calibrage nul — sans
+   * Rend la vanne à un état neutre — ouverture et fermeture 100 %, thermomètre interne, calibrage
+   * nul — sans
    * toucher ni à la consigne, ni à l'interrupteur.
    *
    * Appelée quand la dorsale Zigbee2MQTT DISPARAÎT en cours de journée. Le mode retombe bien sur
@@ -675,7 +676,7 @@ export class HomeyEmitterAdapter implements EmitterAdapter {
 
     let opened = false;
     await this.safely('valve_opening_degree', async () => {
-      opened = await backend.setValveOpening(this.deviceId, 100);
+      opened = await backend.releaseValve(this.deviceId);
     });
 
     if (this.sensorSelectApplied) {

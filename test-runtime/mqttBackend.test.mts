@@ -272,3 +272,16 @@ test('`BROKER_TEST_TIMEOUT_MS` garde de la marge sous les 10 s de l\'API d\'app'
     + `au lieu du diagnostic (valeur actuelle : ${BROKER_TEST_TIMEOUT_MS} ms)`,
   );
 });
+
+test('libération : ouverture ET fermeture à 100 %, la vanne peut de nouveau se fermer', async () => {
+  // `setValveOpening(100)` publiait une fermeture de 0 % : la tête de la chambre ne fermait plus
+  // jamais, consigne à 8,5 °C et 22 °C mesurés.
+  const { instance, client } = backend({ friendlyName: 'Valve salon' });
+  bringUp(client, 'Valve salon');
+
+  assert.equal(await instance.releaseValve('device-1'), true);
+  assert.deepEqual(JSON.parse(client.published.at(-1)?.body ?? '{}'), {
+    valve_opening_degree: 100,
+    valve_closing_degree: 100,
+  });
+});

@@ -226,6 +226,25 @@ export default class VThermApp extends Homey.App {
     if (configurationChanged) void this.alignValveCapabilities();
   }
 
+  /**
+   * Dorsale retirée des réglages : les vannes sont rendues à leur régulateur AVANT qu'elle parte.
+   *
+   * Sans ça, une vanne restait sur le dernier couple ouverture/fermeture du TPI — 12 % et 88 %,
+   * c'est-à-dire figée à 12 % quoi que décide sa propre régulation —, et plus rien côté Homey ne
+   * sait relire ni corriger ces deux degrés une fois Zigbee2MQTT parti.
+   */
+  private async dropValveBackend(previous: ValveBackend | null): Promise<void> {
+    if (previous !== null) {
+      const nowMs = Date.now();
+      for (const participant of this.vtherms.values()) {
+        await participant.releaseValveBeforeBackendRemoval(nowMs);
+      }
+    }
+    // Les réglages ont pu rebrancher une dorsale pendant les libérations : elle a priorité.
+    if (this.valveBackendImpl === previous) this.setValveBackend(null);
+    await previous?.stop();
+  }
+
   private async alignValveCapabilities(): Promise<void> {
     let devices: Homey.Device[];
     try {
@@ -440,8 +459,7 @@ export default class VThermApp extends Homey.App {
       if (problem !== null) {
         this.error(`Dorsale Zigbee2MQTT non démarrée, réglages incomplets : ${problem}.`);
       }
-      this.setValveBackend(null);
-      void previous?.stop();
+      void this.dropValveBackend(previous);
       return;
     }
 

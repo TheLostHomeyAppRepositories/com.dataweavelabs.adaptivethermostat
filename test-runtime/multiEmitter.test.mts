@@ -72,6 +72,7 @@ class FakeHead implements EmitterAdapter {
   }
 
   async applySetpoint(v: number): Promise<void> { await this.record('setpoint', `setpoint:${v}`); }
+  async reassertSetpoint(): Promise<boolean> { await this.record('setpoint', 'reassert'); return true; }
   async applyValve(p: number): Promise<void> { await this.record('valve', `valve:${p}`); }
   readonly headCount = 1;
   readonly mismatchedHeadIds: readonly string[] = [];
@@ -484,4 +485,13 @@ test('relevés d\'un groupe : le plus ancien pour le bandeau, le plus récent po
   assert.equal(g.reportedAtMs, 1_000, 'une tête muette suffit à prévenir');
   assert.equal(g.newestReportedAtMs, 5_000, 'une tête qui répond suffit à chauffer');
   assert.equal(group([c]).newestReportedAtMs, null, 'aucune date, aucun verdict');
+});
+
+test('réaffirmation : chaque tête du mode du groupe vérifie la sienne', async () => {
+  const a = new FakeHead({ id: 'a' });
+  const b = new FakeHead({ id: 'b' });
+  const g = group([a, b]);
+
+  assert.equal(await g.reassertSetpoint(0), true);
+  assert.deepEqual([a.calls, b.calls], [['reassert'], ['reassert']]);
 });

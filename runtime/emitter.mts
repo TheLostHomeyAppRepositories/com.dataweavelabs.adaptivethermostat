@@ -65,6 +65,15 @@ export interface EmitterAdapter {
    */
   get switchUnconfirmed(): boolean;
   applySetpoint(v: number, nowMs: number): Promise<void>;
+  /**
+   * Réécrit la dernière consigne envoyée quand l'émetteur en porte une autre. `true` = réécrite.
+   *
+   * Le noyau ne réécrit une consigne que quand ELLE change : une tête tournée à la main, ou un
+   * pilote qui avale nos écritures, restait sur sa propre valeur indéfiniment. Une tête à 19 °C
+   * qui lit 19,4 °C contre son radiateur reste fermée pendant que l'app demande 19,5 et que la
+   * chaudière tourne ; une autre à 19 °C chauffe une chambre que l'app voulait à 17.
+   */
+  reassertSetpoint(nowMs: number): Promise<boolean>;
   applyValve(percent: number, nowMs: number): Promise<void>;
   /**
    * Commande les interrupteurs du groupe, une entrée par tête et dans leur ordre.
@@ -168,6 +177,12 @@ const DETECT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_SYNC_MIN_DELTA_C = 0.5;
 const DEFAULT_SYNC_MIN_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_FORCE_REFRESH_MS = 60 * 60_000;
+/**
+ * Au plus une réécriture de consigne divergente toutes les 5 min. Une vanne sur piles dont le
+ * pilote avale nos écritures — la TRVZB sous le pilote Sonoff officiel — serait sinon réécrite à
+ * chaque pas, pour rien.
+ */
+export const SETPOINT_REASSERT_MIN_MS = 5 * 60_000;
 
 /** Chaque canal a sa propre mémoire d'écriture : un écho de consigne n'est pas un écho de vanne. */
 type WriteChannel = 'setpoint' | 'valve' | 'externalTemp' | 'calibration' | 'switch';
@@ -428,6 +443,23 @@ export class HomeyEmitterAdapter implements EmitterAdapter {
     const value = clamp(v, SETPOINT_MIN, SETPOINT_MAX);
     const wrote = await this.writeBinding(binding, value, { nowMs, maxIntervalMs: this.forceRefreshMs }, 'setpoint');
     if (wrote) this.remember('setpoint', value, nowMs);
+  }
+
+  async reassertSetpoint(nowMs: number): Promise<boolean> {
+    const binding = this.setpointBinding;
+    const last = this.lastSent.get('setpoint');
+    if (binding === null || last === undefined || typeof last.value !== 'number') return false;
+    if (nowMs - last.atMs < SETPOINT_REASSERT_MIN_MS) return false;
+
+    // Débarrassée de nos échos : `null` tant que l'émetteur porte ce qu'on lui a envoyé.
+    const reading = this.readSetpoint(nowMs);
+    if (reading === null || reading.stale) return false;
+
+    // `maxIntervalMs: 1` : la liaison a déjà écrit cette valeur et la dédupliquerait.
+    const value = last.value;
+    const wrote = await this.writeBinding(binding, value, { nowMs, maxIntervalMs: 1 }, 'setpoint');
+    if (wrote) this.remember('setpoint', value, nowMs);
+    return wrote;
   }
 
   /**

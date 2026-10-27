@@ -80,6 +80,15 @@ export class FakeEmitter implements EmitterAdapter {
     this.setpoints.push({ value: v, nowMs });
   }
 
+  /** Ce que rend la prochaine `reassertSetpoint`, et les instants où elle a été appelée. */
+  reassertResult = false;
+  readonly reasserts: number[] = [];
+
+  async reassertSetpoint(nowMs: number): Promise<boolean> {
+    this.reasserts.push(nowMs);
+    return this.reassertResult;
+  }
+
   async applyValve(percent: number, nowMs: number): Promise<void> {
     await this.waitGate();
     this.valves.push({ percent, nowMs });

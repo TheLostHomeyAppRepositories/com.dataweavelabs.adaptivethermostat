@@ -15,7 +15,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HomeyEmitterAdapter, ECHO_WINDOW_MS, type EmitterFreshness } from '../runtime/emitter.mjs';
+import {
+  HomeyEmitterAdapter, ECHO_WINDOW_MS, SETPOINT_REASSERT_MIN_MS, type EmitterFreshness,
+} from '../runtime/emitter.mjs';
 import { FakeHub, summaryOf } from './fakes/hub.mjs';
 import { FakeValveBackend } from './fakes/valveBackend.mjs';
 
@@ -239,6 +241,63 @@ test('une valeur relue égale à la dernière envoyée est notre propre écho, p
   // Passée la fenêtre, une valeur différente est bien une consigne posée par quelqu'un d'autre.
   binding.setReading(21, ECHO_WINDOW_MS + 1_000);
   assert.equal(emitter.readSetpoint(ECHO_WINDOW_MS + 1_000)?.value, 21);
+});
+
+// --- Réaffirmer une consigne que la tête n'a pas gardée -------------------------
+
+async function reassertWorld(): Promise<{
+  emitter: HomeyEmitterAdapter; binding: NonNullable<ReturnType<FakeHub['binding']>>;
+}> {
+  const hub = new FakeHub();
+  hub.summary = summaryOf({ capabilities: ['target_temperature'], setable: ['target_temperature'] });
+  const emitter = adapter(hub);
+  await emitter.detect(0);
+  await emitter.applySetpoint(19.5, 0);
+  const binding = hub.binding('target_temperature');
+  assert.ok(binding !== undefined);
+  return { emitter, binding };
+}
+
+test('tête revenue à 19 °C quand l\'app demande 19,5 : la consigne est réécrite', async () => {
+  // La TRVZB du salon : 19 °C sur la tête, 19,4 °C contre le radiateur, donc fermée, pendant que
+  // l'app demandait 19,5 et que la chaudière tournait.
+  const { emitter, binding } = await reassertWorld();
+  binding.setReading(19, 60_000);
+
+  assert.equal(await emitter.reassertSetpoint(SETPOINT_REASSERT_MIN_MS), true);
+  assert.equal(binding.lastWrite?.value, 19.5);
+});
+
+test('une tête qui porte notre consigne n\'est pas réécrite', async () => {
+  const { emitter, binding } = await reassertWorld();
+  binding.setReading(19.5, 60_000);
+  const before = binding.writes.length;
+
+  assert.equal(await emitter.reassertSetpoint(SETPOINT_REASSERT_MIN_MS), false);
+  assert.equal(binding.writes.length, before);
+});
+
+test('pas plus d\'une réécriture toutes les cinq minutes : une vanne sur piles qui avale tout', async () => {
+  const { emitter, binding } = await reassertWorld();
+  binding.setReading(19, 60_000);
+
+  assert.equal(await emitter.reassertSetpoint(SETPOINT_REASSERT_MIN_MS - 1), false, 'trop tôt');
+  assert.equal(await emitter.reassertSetpoint(SETPOINT_REASSERT_MIN_MS), true);
+
+  // Le pilote a encore avalé l'écriture : la tête relit 19.
+  binding.setReading(19, SETPOINT_REASSERT_MIN_MS + 60_000);
+  assert.equal(await emitter.reassertSetpoint(SETPOINT_REASSERT_MIN_MS + 60_000), false, 'le délai repart');
+  assert.equal(await emitter.reassertSetpoint(2 * SETPOINT_REASSERT_MIN_MS), true);
+});
+
+test('rien n\'a jamais été envoyé : rien à réaffirmer', async () => {
+  const hub = new FakeHub();
+  hub.summary = summaryOf({ capabilities: ['target_temperature'], setable: ['target_temperature'] });
+  const emitter = adapter(hub);
+  await emitter.detect(0);
+  hub.binding('target_temperature')?.setReading(19, 0);
+
+  assert.equal(await emitter.reassertSetpoint(SETPOINT_REASSERT_MIN_MS), false);
 });
 
 // --- Rendre la vanne quand la dorsale disparaît -------------------------------

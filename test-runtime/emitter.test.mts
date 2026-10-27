@@ -333,6 +333,7 @@ test('la vanne est rendue OUVERTE à 100 %, sur son propre capteur, sans calibra
   assert.equal(await emitter.releaseValve(60_000), true);
 
   assert.equal(backend.lastOpening, 100, 'la vanne est GRANDE OUVERTE : la pièce peut remonter');
+  assert.deepEqual(backend.releases, [DEVICE_ID], 'par la libération, pas par `setValveOpening(100)` qui ne ferme plus');
   assert.deepEqual(backend.sensorSelects, ['external', 'internal'], 'elle régule sur son thermomètre');
 });
 

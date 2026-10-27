@@ -746,6 +746,14 @@ export class VThermParticipant implements Tickable {
     this.requestTick('valve-backend-lost');
   }
 
+  /**
+   * La dorsale va être retirée des réglages : dernière occasion de rendre la vanne. Au mieux :
+   * sans dorsale, rien ne pourra plus jamais la toucher, donc rien à signaler non plus.
+   */
+  async releaseValveBeforeBackendRemoval(nowMs: number): Promise<void> {
+    await this.safely('libération de la vanne', () => this.emitter.releaseValve(nowMs));
+  }
+
   /** Un ré-abonnement a eu lieu : le jeu de capabilities de l'émetteur est peut-être différent. */
   invalidateEmitterDetection(): void {
     this.emitter.invalidateDetection();

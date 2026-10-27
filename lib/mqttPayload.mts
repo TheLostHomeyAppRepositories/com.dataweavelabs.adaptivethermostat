@@ -83,6 +83,21 @@ export function clampCalibration(offsetC: number): number | null {
 // --- Construction des payloads ---------------------------------------------
 
 /**
+ * La vanne rendue à son propre régulateur : ouverture ET fermeture à 100 %, les défauts d'usine.
+ *
+ * Surtout pas `buildValvePayload(100)`, qui donne une fermeture de 0 %. Sur une TRVZB, le degré de
+ * fermeture dit jusqu'où la vanne se ferme quand ELLE décide de fermer : à 0 %, plus jamais. Une
+ * vanne « rendue » ainsi chauffait sa pièce sans fin, consigne basse ou non, et le réglage reste
+ * gravé dans la tête une fois la dorsale partie — rien côté Homey ne sait le relire ni le corriger.
+ */
+export function buildValveReleasePayload(): Z2mPayload {
+  return {
+    valve_opening_degree: VALVE_OPENING_MAX,
+    valve_closing_degree: VALVE_OPENING_MAX,
+  };
+}
+
+/**
  * Ouverture ET fermeture dans le MÊME payload (SPEC §5.5).
  *
  * `valve_closing_degree` reçoit `100 − ouverture`. Deux publications séparées feraient deux

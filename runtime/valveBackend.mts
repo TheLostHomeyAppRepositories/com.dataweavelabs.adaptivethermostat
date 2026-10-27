@@ -46,6 +46,14 @@ export interface ValveBackend {
    */
   setValveOpening(deviceId: string, percent: number): Promise<boolean>;
 
+  /**
+   * Rend la vanne à son propre régulateur : ouverture et fermeture à 100 %. Vrai si parti.
+   *
+   * Distinct de `setValveOpening(100)`, qui publie une fermeture de 0 % et laisse donc la vanne
+   * incapable de se fermer. Voir `buildValveReleasePayload`.
+   */
+  releaseValve(deviceId: string): Promise<boolean>;
+
   /** `external_temperature_input`, en °C (SPEC §5.3). Vrai si la publication est partie. */
   setExternalTemperature(deviceId: string, celsius: number): Promise<boolean>;
 

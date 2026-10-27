@@ -26,6 +26,16 @@ export class FakeValveBackend implements ValveBackend {
     return true;
   }
 
+  /** Vannes rendues à leur régulateur. Comptées aussi dans `openings`, à 100 %. */
+  readonly releases: string[] = [];
+
+  async releaseValve(deviceId: string): Promise<boolean> {
+    if (!this.succeeds) return false;
+    this.releases.push(deviceId);
+    this.openings.push({ deviceId, percent: 100 });
+    return true;
+  }
+
   async setExternalTemperature(_deviceId: string, celsius: number): Promise<boolean> {
     if (!this.succeeds) return false;
     this.externalTemps.push(celsius);

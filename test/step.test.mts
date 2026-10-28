@@ -1451,3 +1451,17 @@ test('préchauffe : la nuit en absence, une cible Éco ne passe pas pour une hau
   assert.equal(before.outputs.capabilities.vtherm_preset, 'comfort');
   assert.equal(before.nextState.persistent.preheatTargets.length, 1);
 });
+
+test('préchauffe, modèle extérieur : le noyau passe la température dehors au calcul d\'avance', () => {
+  const atMs = 10 * HOUR;
+  // Vitesse = 0,5 + 0,1 × T_ext, 1 °C à rattraper : 55 min à 10 °C dehors, 135 min à 0 °C.
+  const history = [[0, 0.5], [2, 0.7], [5, 1.0], [8, 1.3], [10, 1.5]].map(([outdoorMean, ratePerHour], i) => ({
+    atMs: i, ratePerHour: ratePerHour as number, deadTimeMin: 15, outdoorMean: outdoorMean as number,
+  }));
+  const state = preheatState(atMs, { preheatLearning: { ...LEARNED, history } });
+  const at = atMs - 100 * 60_000;
+  const mild = stepVTherm(state, inputs({ roomTemp: reading(21, at), outdoorTemp: reading(10, at) }), PREHEAT_CONFIG, at);
+  assert.equal(mild.outputs.capabilities.vtherm_preset, 'eco');
+  const cold = stepVTherm(state, inputs({ roomTemp: reading(21, at), outdoorTemp: reading(0, at) }), PREHEAT_CONFIG, at);
+  assert.equal(cold.outputs.capabilities.vtherm_preset, 'comfort');
+});

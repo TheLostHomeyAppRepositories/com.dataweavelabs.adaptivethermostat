@@ -24,7 +24,7 @@ import type {
 } from './types.mjs';
 import {
   DEFAULT_PREHEAT_MAX_LEAD_MIN, PREHEAT_DEFAULT_DEAD_TIME_MIN, PREHEAT_DEFAULT_RATE_PER_HOUR,
-  PREHEAT_EPISODE, PREHEAT_LEARNED_AFTER_EPISODES, PREHEAT_MAX_TARGETS,
+  PREHEAT_EPISODE, PREHEAT_LEARNED_AFTER_EPISODES, PREHEAT_MAX_TARGETS, PREHEAT_OUTDOOR_MODEL,
   PREHEAT_UNLEARNED_MAX_LEAD_MIN,
 } from './constants.mjs';
 
@@ -76,12 +76,108 @@ export function computeLeadMin(
   roomTemp: number,
   learning: PreheatLearning,
   maxLeadMin: number,
+  ratePerHour: number = learning.ratePerHour,
 ): number {
   const gapTenths = tenths(targetTemp) - tenths(roomTemp);
   if (gapTenths <= 0) return 0;
 
-  const lead = learning.deadTimeMin + (gapTenths / 10 / learning.ratePerHour) * 60;
+  const lead = learning.deadTimeMin + (gapTenths / 10 / ratePerHour) * 60;
   return Math.min(effectiveMaxLeadMin(learning, maxLeadMin), Math.max(0, lead));
+}
+
+// --- Modèle extérieur (lot 2) -------------------------------------------------
+
+/**
+ * La pente de la vitesse en fonction de l'extérieur, et le domaine où elle vaut.
+ *
+ * Ce n'est pas une droite qui remplace la moyenne apprise : c'est une CORRECTION autour d'elle. La
+ * moyenne suit les derniers matins (poids 0,3) ; une droite non pondérée sur vingt épisodes, elle,
+ * garderait le printemps dernier, une tête depuis changée, une vanne depuis encrassée.
+ */
+export interface OutdoorRateModel {
+  /** °C/h gagnés par °C de plus dehors. */
+  slope: number;
+  /** Température extérieure moyenne des épisodes : là où la correction est nulle. */
+  meanOutdoor: number;
+  minOutdoor: number;
+  maxOutdoor: number;
+  /** Vitesses mesurées extrêmes : la prédiction n'en sort pas. */
+  minRate: number;
+  maxRate: number;
+  episodes: number;
+}
+
+/**
+ * Pente des moindres carrés de la vitesse en fonction de l'extérieur, ou `null` si elle n'est pas
+ * digne de confiance.
+ *
+ * Pente négative refusée : « plus il fait froid, plus ça chauffe vite » n'est jamais la physique,
+ * c'est le bruit de quelques épisodes — un soleil d'hiver, une chaudière partagée avec moins de
+ * pièces ce matin-là. Corrélation faible refusée aussi : cinq épisodes bruités donnent une pente
+ * raide par hasard, et suivre ce hasard raccourcirait l'avance jusqu'au seul temps mort.
+ */
+export function fitOutdoorRateModel(learning: PreheatLearning): OutdoorRateModel | null {
+  const points = learning.history.filter(
+    (record): record is typeof record & { outdoorMean: number } => record.outdoorMean !== null,
+  );
+  if (points.length < PREHEAT_OUTDOOR_MODEL.minEpisodes) return null;
+
+  const xs = points.map((point) => point.outdoorMean);
+  const ys = points.map((point) => point.ratePerHour);
+  const minOutdoor = Math.min(...xs);
+  const maxOutdoor = Math.max(...xs);
+  if (maxOutdoor - minOutdoor < PREHEAT_OUTDOOR_MODEL.minSpread) return null;
+
+  const meanX = xs.reduce((sum, x) => sum + x, 0) / points.length;
+  const meanY = ys.reduce((sum, y) => sum + y, 0) / points.length;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  points.forEach((_, i) => {
+    const dx = (xs[i] as number) - meanX;
+    const dy = (ys[i] as number) - meanY;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
+  });
+  if (syy === 0) return null;
+  const correlation = sxy / Math.sqrt(sxx * syy);
+  if (!(correlation >= PREHEAT_OUTDOOR_MODEL.minCorrelation)) return null;
+
+  return {
+    slope: sxy / sxx,
+    meanOutdoor: meanX,
+    minOutdoor,
+    maxOutdoor,
+    minRate: Math.min(...ys),
+    maxRate: Math.max(...ys),
+    episodes: points.length,
+  };
+}
+
+/**
+ * Vitesse corrigée de `baseRate` (la moyenne apprise) pour `outdoorTemp`. L'extérieur est borné à la
+ * plage observée élargie de 2 °C, la vitesse aux vitesses réellement mesurées : jamais plus lente
+ * que le matin le plus lent — sinon l'avance partirait au plafond, la pièce en Confort en pleine
+ * nuit — ni plus rapide que le plus rapide.
+ */
+export function predictRate(model: OutdoorRateModel, baseRate: number, outdoorTemp: number): number {
+  const x = Math.min(
+    model.maxOutdoor + PREHEAT_OUTDOOR_MODEL.extrapolation,
+    Math.max(model.minOutdoor - PREHEAT_OUTDOOR_MODEL.extrapolation, outdoorTemp),
+  );
+  const rate = baseRate + model.slope * (x - model.meanOutdoor);
+  return Math.min(model.maxRate, Math.max(model.minRate, rate));
+}
+
+/**
+ * La vitesse à utiliser maintenant : la moyenne apprise, corrigée par le modèle extérieur quand il
+ * existe et qu'on connaît la température dehors. Sans capteur extérieur, rien ne change du lot 1.
+ */
+export function rateFor(learning: PreheatLearning, outdoorTemp: number | null): number {
+  if (outdoorTemp === null) return learning.ratePerHour;
+  const model = fitOutdoorRateModel(learning);
+  return model === null ? learning.ratePerHour : predictRate(model, learning.ratePerHour, outdoorTemp);
 }
 
 // --- Cibles -----------------------------------------------------------------
@@ -95,6 +191,8 @@ export interface PreheatTargetsInput {
   currentSetpoint: number;
   presetTemps: PresetTemps;
   maxLeadMin: number;
+  /** Température extérieure actuelle, `null` sans capteur ou lecture périmée. */
+  outdoorTemp?: number | null;
 }
 
 export interface PreheatTargetsResult {
@@ -121,6 +219,8 @@ export interface PreheatTargetsResult {
  * arriver en retard la personne qui se lève.
  */
 export function stepPreheatTargets(input: PreheatTargetsInput, nowMs: number): PreheatTargetsResult {
+  // Un seul ajustement par pas, pas un par cible : l'historique ne change qu'à l'acceptation.
+  const ratePerHour = rateFor(input.learning, input.outdoorTemp ?? null);
   const starts = input.targets.map((target) => {
     /*
      * Seule une cible qui RELÈVE la consigne s'anticipe. « Éco à 22 h » dans un salon qui plafonne
@@ -130,7 +230,7 @@ export function stepPreheatTargets(input: PreheatTargetsInput, nowMs: number): P
     const targetTemp = input.presetTemps[target.preset];
     const leadMin = input.roomTemp === null || tenths(targetTemp) <= tenths(input.currentSetpoint)
       ? 0
-      : computeLeadMin(targetTemp, input.roomTemp, input.learning, input.maxLeadMin);
+      : computeLeadMin(targetTemp, input.roomTemp, input.learning, input.maxLeadMin, ratePerHour);
     return { target, leadMin, startAtMs: target.atMs - leadMin * MS_PER_MINUTE };
   });
 
@@ -253,7 +353,11 @@ function accept(
   const deadTimeMin = Math.max(0, (riseAtMs - episode.startMs) / MS_PER_MINUTE);
 
   const weight = Math.max(PREHEAT_EPISODE.minWeight, 1 / (learning.accepted + 1));
-  const outdoorMean = episode.outdoorCount > 0 ? round(episode.outdoorSum / episode.outdoorCount, 1) : null;
+  // Une T_ext tirée d'une seule lecture sur trois heures de montée n'est pas celle de la montée :
+  // mieux vaut un épisode sans T_ext, qui nourrit encore la moyenne, qu'un point faux pour la pente.
+  const covered = episode.outdoorCount > 0
+    && episode.outdoorCount >= PREHEAT_OUTDOOR_MODEL.minOutdoorCoverage * episode.steps;
+  const outdoorMean = covered ? round(episode.outdoorSum / episode.outdoorCount, 1) : null;
 
   return {
     episode: null,
@@ -330,6 +434,7 @@ export function stepEpisode(
         demandSeen: obs.demand.kind === 'active',
         outdoorSum: obs.outdoorTemp ?? 0,
         outdoorCount: obs.outdoorTemp === null ? 0 : 1,
+        steps: 1,
       },
       learning: base,
     };
@@ -347,6 +452,7 @@ export function stepEpisode(
     demandSeen: current.demandSeen || obs.demand.kind === 'active',
     outdoorSum: current.outdoorSum + (obs.outdoorTemp ?? 0),
     outdoorCount: current.outdoorCount + (obs.outdoorTemp === null ? 0 : 1),
+    steps: current.steps + 1,
   };
 
   // Une demande `unknown` (tête en mode consigne qui n'a pas encore répondu) est neutre : elle ne

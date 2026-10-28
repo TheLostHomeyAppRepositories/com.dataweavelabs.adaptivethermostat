@@ -221,6 +221,7 @@ export function stepVTherm(
     currentSetpoint: chosenBeforePreheat,
     presetTemps: config.presetTemps,
     maxLeadMin: preheatMaxLeadMin,
+    outdoorTemp,
   }, nowMs);
 
   // Une bascule vaut un `set_preset` : preset durable, preset temporisé annulé — même un boost

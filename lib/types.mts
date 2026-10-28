@@ -378,7 +378,9 @@ export interface PreheatEpisode {
   /** Une demande `active` a été vue depuis le début. */
   demandSeen: boolean;
   outdoorSum: number;
+  /** Pas avec une lecture extérieure fraîche, sur `steps` pas observés. */
   outdoorCount: number;
+  steps: number;
 }
 
 // ---------------------------------------------------------------------------

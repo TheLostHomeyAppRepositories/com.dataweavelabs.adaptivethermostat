@@ -8,8 +8,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addPreheatTarget, computeLeadMin, createPreheatLearning, stepEpisode, stepPreheatTargets,
-  targetsAfterManualChange, type EpisodeObservation,
+  addPreheatTarget, computeLeadMin, createPreheatLearning, fitOutdoorRateModel, predictRate, rateFor,
+  stepEpisode, stepPreheatTargets, targetsAfterManualChange, type EpisodeObservation,
 } from '../lib/preheat.mjs';
 import type { PreheatEpisode, PreheatLearning, PreheatTarget, PresetTemps } from '../lib/types.mjs';
 
@@ -362,4 +362,113 @@ test('épisode qui dépasse 12 h, rejet motif too_long ; 7 h reste admis (chauff
   assert.equal(slow.learning.rejected, 0);
   const result = stepEpisode(started.episode, started.learning, observation({ roomTemp: 19.2, roomAtMs: 700 * MIN }), 721 * MIN);
   assert.equal(result.learning.lastRejectReason, 'too_long');
+});
+
+// --- Modèle extérieur (lot 2) -------------------------------------------------
+
+/** Historique d'épisodes `[T_ext, vitesse]`, au format persisté. */
+function withHistory(points: [number | null, number][], overrides: Partial<PreheatLearning> = {}): PreheatLearning {
+  return learned({
+    ratePerHour: 1,
+    history: points.map(([outdoorMean, ratePerHour], index) => ({
+      atMs: index * 24 * 60 * MIN, ratePerHour, deadTimeMin: 15, outdoorMean,
+    })),
+    ...overrides,
+  });
+}
+
+// Vitesse = 0,5 + 0,1 × T_ext, exactement : 0 °C → 0,5 ; 5 °C → 1,0 ; 10 °C → 1,5.
+const LINE: [number, number][] = [[0, 0.5], [2, 0.7], [5, 1.0], [8, 1.3], [10, 1.5]];
+
+test('modèle extérieur : la pente, le centre et les bornes d\'une droite exacte', () => {
+  const model = fitOutdoorRateModel(withHistory(LINE));
+  assert.notEqual(model, null);
+  near(model!.slope, 0.1);
+  near(model!.meanOutdoor, 5);
+  assert.deepEqual([model!.minOutdoor, model!.maxOutdoor, model!.minRate, model!.maxRate], [0, 10, 0.5, 1.5]);
+  assert.equal(model!.episodes, 5);
+});
+
+test('modèle extérieur : refusé sous 5 épisodes, sous 4 °C d\'écart, ou sans T_ext', () => {
+  assert.equal(fitOutdoorRateModel(withHistory(LINE.slice(0, 4))), null);
+  assert.equal(fitOutdoorRateModel(withHistory([[5, 1], [6, 1.1], [7, 1.2], [8, 1.3], [8.9, 1.4]])), null,
+    '3,9 °C d\'écart : pas identifiable');
+  assert.equal(fitOutdoorRateModel(withHistory([...LINE.slice(0, 4), [null, 3]])), null,
+    'un épisode sans capteur extérieur ne compte pas');
+});
+
+test('modèle extérieur : une pente négative (plus vite par grand froid) est refusée', () => {
+  assert.equal(fitOutdoorRateModel(withHistory([[0, 1.5], [2, 1.3], [5, 1.0], [8, 0.7], [10, 0.5]])), null);
+});
+
+test('modèle extérieur : cinq épisodes bruités (corrélation 0,47) ne font pas une pente', () => {
+  assert.equal(fitOutdoorRateModel(withHistory([[4, 0.6], [5, 2.5], [6, 0.7], [7, 1.0], [8, 3.0]])), null);
+});
+
+test('modèle extérieur : une correction autour de la moyenne récente, pas son remplacement', () => {
+  const model = fitOutdoorRateModel(withHistory(LINE))!;
+  near(predictRate(model, 1.0, 0), 0.5);
+  // La pièce est devenue plus lente ces derniers matins : moyenne 0,8. Au centre (5 °C), c'est elle
+  // qui compte, pas les 1,0 °C/h des vieux épisodes.
+  near(predictRate(model, 0.8, 5), 0.8);
+  near(predictRate(model, 0.8, 8), 1.1);
+});
+
+test('modèle extérieur : jamais plus lent ni plus rapide que les matins mesurés', () => {
+  const model = fitOutdoorRateModel(withHistory(LINE))!;
+  // −10 °C → bornée à −2 °C : 1,0 − 0,7 = 0,3, relevée au plus lent mesuré, 0,5.
+  near(predictRate(model, 1.0, -10), 0.5);
+  // 30 °C → bornée à 12 °C : 1,0 + 0,7 = 1,7, abaissée au plus rapide mesuré, 1,5.
+  near(predictRate(model, 1.0, 30), 1.5);
+});
+
+test('modèle extérieur : sans température dehors ou sans modèle, la moyenne du lot 1', () => {
+  assert.equal(rateFor(withHistory(LINE, { ratePerHour: 0.9 }), null), 0.9);
+  assert.equal(rateFor(withHistory(LINE.slice(0, 3), { ratePerHour: 0.9 }), 0), 0.9);
+  near(rateFor(withHistory(LINE, { ratePerHour: 1.0 }), 0), 0.5);
+});
+
+test('modèle extérieur : l\'avance suit la vitesse qu\'on lui donne', () => {
+  const learning = withHistory(LINE);
+  // 2 °C à rattraper. À 0,5 °C/h : 15 + 240 = 255, plafonnés à 180. À 1,5 : 15 + 80 = 95.
+  assert.equal(computeLeadMin(22, 20, learning, 180, 0.5), 180);
+  near(computeLeadMin(22, 20, learning, 180, 1.5), 95);
+  near(computeLeadMin(22, 20, learning, 180), 135, 'par défaut, la moyenne (1 °C/h)');
+});
+
+test('modèle extérieur : la cible part plus tôt un matin froid', () => {
+  const atMs = 7 * 60 * MIN;
+  const input = {
+    targets: [{ preset: 'comfort' as const, atMs }],
+    learning: withHistory(LINE),
+    roomTemp: 21,
+    currentSetpoint: 17,
+    presetTemps: TEMPS,
+    maxLeadMin: 180,
+  };
+  // 1 °C : à 10 °C dehors 15 + 40 = 55 min ; à 0 °C, 15 + 120 = 135 min.
+  const at = atMs - 100 * MIN;
+  assert.equal(stepPreheatTargets({ ...input, outdoorTemp: 10 }, at).fired, null);
+  assert.equal(stepPreheatTargets({ ...input, outdoorTemp: 0 }, at).fired?.preset, 'comfort');
+});
+
+test('épisode : une T_ext lue sur moins de la moitié des pas n\'est pas enregistrée', () => {
+  const series: [number, number, number | null][] = [[0, 19.0, 3], [12, 19.1, null], [60, 20.5, null], [120, 21.8, null]];
+  const run = (outdoor: (index: number) => number | null): PreheatLearning => {
+    let episode: PreheatEpisode | null = null;
+    let learning = createPreheatLearning();
+    series.forEach(([minutes, temp], index) => {
+      const result = stepEpisode(episode, learning, observation({
+        roomTemp: temp, roomAtMs: minutes * MIN, previousSetpoint: index === 0 ? 17 : 22, outdoorTemp: outdoor(index),
+      }), minutes * MIN);
+      episode = result.episode;
+      learning = result.learning;
+    });
+    return learning;
+  };
+  const sparse = run((index) => series[index]![2]);
+  assert.equal(sparse.accepted, 1);
+  assert.equal(sparse.history[0]?.outdoorMean, null, 'une lecture sur quatre');
+  const half = run((index) => (index % 2 === 0 ? 4 : null));
+  assert.equal(half.history[0]?.outdoorMean, 4, 'deux sur quatre suffisent');
 });

@@ -140,8 +140,9 @@
     "preheat": {
       "status_none": "Nog niets gemeten: voorverwarmen gaat uit van {rate} °C per uur en {dead} minuten opstarttijd.",
       "status_rejected": "Nog geen bruikbare opwarming ({rejected} genegeerd, laatste reden: {reason}). Voorverwarmen gebruikt de voorzichtige standaardwaarden.",
-      "status_learned": "Stijgt {rate} °C/u na {dead} min opstarttijd — {accepted} opwarmingen gemeten, {rejected} genegeerd.",
+      "status_learned": "Stijgt gemiddeld {rate} °C/u na {dead} min opstarttijd — {accepted} opwarmingen gemeten, {rejected} genegeerd.",
       "status_capped": "Voorsprong nog beperkt tot {cap} min tot er {n} opwarmingen gemeten zijn.",
+      "status_outdoor": "Met een buitensensor volgt de voorsprong het weer: {cold} °C/u bij {tcold} °C buiten, {warm} °C/u bij {twarm} °C.",
       "status_plateau": "De laatste opwarming bleef steken op {temp} °C, onder de instelwaarde: de kamer haalt die mogelijk niet.",
       "status_excluded": "Leert niet: de kamersensor is een van de koppen, die bij de radiator meet en niet in de kamer. Koppel een aparte kamersensor om het in te schakelen.",
       "reason_interrupted": "het verwarmen werd uitgeschakeld of verlaagd tijdens de opwarming",

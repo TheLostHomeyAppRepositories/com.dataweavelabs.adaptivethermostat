@@ -140,8 +140,9 @@
     "preheat": {
       "status_none": "Nothing measured yet: preheating assumes {rate} °C per hour and {dead} minutes to get going.",
       "status_rejected": "No usable rise yet ({rejected} discarded, last reason: {reason}). Preheating uses its cautious defaults.",
-      "status_learned": "Rises at {rate} °C/h after {dead} min to get going — {accepted} rises measured, {rejected} discarded.",
+      "status_learned": "Rises at {rate} °C/h on average after {dead} min to get going — {accepted} rises measured, {rejected} discarded.",
       "status_capped": "Lead still capped at {cap} min until {n} rises are measured.",
+      "status_outdoor": "With an outdoor sensor, the lead follows the weather: {cold} °C/h at {tcold} °C outside, {warm} °C/h at {twarm} °C.",
       "status_plateau": "The last rise levelled off at {temp} °C, below the setpoint: the room may not reach it.",
       "status_excluded": "Not learning: the room sensor is one of the heads, which measures at the radiator, not in the room. Link a separate room sensor to enable it.",
       "reason_interrupted": "heating was switched off or lowered during the rise",

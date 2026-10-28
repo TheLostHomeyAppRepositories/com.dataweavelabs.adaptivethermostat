@@ -248,6 +248,13 @@ export default class VThermDriver extends Homey.Driver {
         zoneName: summary.zoneName,
       }));
 
+    // La météo de Homey, en tête et pour la seule source extérieure : sans capteur dehors — ou
+    // avec un capteur resté dans la maison —, c'est la seule température extérieure honnête.
+    if (source === 'outdoor') {
+      const weather = this.app.hub.weatherSummary();
+      candidates.unshift({ id: weather.id, name: weather.name, zoneName: null });
+    }
+
     this.app.trace(
       `[${DRIVER_TAG}] list_candidates(${capability}) : ${summaries.length} trouvé(s), `
       + `${candidates.length} transmis — ${candidates.map((c) => c.name).join(' | ') || 'aucun'}`,

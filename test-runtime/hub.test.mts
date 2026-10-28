@@ -89,6 +89,11 @@ const fakeApi = {
       return { z1: { id: 'z1', name: 'Chaufferie' } };
     },
   },
+  weather: {
+    async getWeather(): Promise<unknown> {
+      return { city: 'Palais-Royal', temperature: 9.5, temperatureCelsius: 9.5, when: new Date().toISOString() };
+    },
+  },
   on(): void { /* aucun événement websocket dans ces essais. */ },
   destroy(): void { /* rien à relâcher. */ },
 };
@@ -306,4 +311,24 @@ test('un capteur qui ne remonte que sa température reste frais tant que Homey l
     relay.capabilities.splice(relay.capabilities.indexOf('measure_temperature'), 1);
     delete relay.capabilitiesObj.measure_temperature;
   }
+});
+
+// --- Météo de Homey -----------------------------------------------------------
+
+test('l\'identifiant réservé météo se lie comme un capteur : nom, capability et température', async () => {
+  const { WEATHER_SOURCE_ID } = await import('../lib/weather.mjs');
+  const hub = newHub();
+  await hub.start();
+
+  const summary = await hub.getDeviceSummary(WEATHER_SOURCE_ID);
+  assert.equal(summary?.name, 'weather.source_name');
+  assert.deepEqual(summary?.capabilities, ['measure_temperature']);
+
+  const binding = hub.bind(WEATHER_SOURCE_ID, 'measure_temperature');
+  await hub.weather.maybeFetch(Date.now());
+  assert.equal(binding.read(Date.now(), 2 * 60 * 60_000)?.value, 9.5);
+  await assert.rejects(binding.write(1, { nowMs: 0 }), 'une température météo ne s\'écrit pas');
+
+  await hub.stop();
+  assert.equal(binding.read(Date.now(), 2 * 60 * 60_000), null, 'arrêter le hub relâche la météo');
 });

@@ -176,5 +176,8 @@
       "unknown_preset": "Preset inconnu.",
       "invalid_time": "Heure invalide. Utilisez HH:MM."
     }
+  },
+  "weather": {
+    "source_name": "Météo de Homey (internet)"
   }
 }

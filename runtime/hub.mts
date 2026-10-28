@@ -610,6 +610,8 @@ export class HomeyApiHub {
 
     await this.reattachAll();
     this.events.emit('connected');
+    // La première requête météo est souvent partie avant l'API : on la relance dès qu'elle est là.
+    void this.weather.maybeFetch(Date.now());
   }
 
   /** Ré-abonne toutes les liaisons. Rejoué après chaque reconnexion : les `Device` du cache ont pu être remplacés. */
@@ -749,7 +751,9 @@ export class HomeyApiHub {
       class: 'sensor',
       capabilities: ['measure_temperature'],
       setable: {},
-      available: true,
+      // Aucune lecture encore arrivée (pas d'emplacement, pas d'internet) : la page de sources le
+      // montre, au lieu d'un lien d'apparence saine sur une source muette.
+      available: !this.weather.unavailable,
       driverUri: null,
       reportedAtMs: this.weather.reading?.atMs ?? null,
     };

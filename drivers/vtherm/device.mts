@@ -32,6 +32,7 @@ import type {
 } from '../../lib/types.mjs';
 import { formatLocalHhMm, nextOccurrenceMs } from '../../lib/localTime.mjs';
 import { fitOutdoorRateModel, predictRate } from '../../lib/preheat.mjs';
+import { isWeatherMisused } from '../../lib/weather.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { CapValue } from '../../runtime/hub.mjs';
 import { HomeyEmitterAdapter, type EmitterAdapter } from '../../runtime/emitter.mjs';
@@ -682,6 +683,8 @@ export default class VThermDevice extends Homey.Device {
     if (deviceId === null && REQUIRED_SOURCES.includes(key)) {
       throw new Error(this.homey.__('pair.error.incomplete'));
     }
+    // La météo comme capteur de pièce chaufferait sur la température du dehors.
+    if (isWeatherMisused(key, deviceId)) throw new Error(this.homey.__('settings.sources.invalid_device'));
 
     if (key === 'emitter') {
       // Re-désigner « l'émetteur » remplace la tête n°1 SANS toucher aux suivantes : c'est la voie
@@ -883,6 +886,9 @@ export default class VThermDevice extends Homey.Device {
    * du groupe resterait figée sur sa dernière ouverture, chauffée par personne.
    */
   async setEmitterIds(ids: readonly string[]): Promise<void> {
+    if (ids.some((id) => isWeatherMisused('emitter', id))) {
+      throw new Error(this.homey.__('settings.sources.invalid_device'));
+    }
     // SÉRIALISÉ, parce que la page de réparation appelle ceci à CHAQUE case cochée et qu'un
     // rechargement dure plusieurs allers-retours réseau. Deux appels qui se chevauchent voyaient
     // chacun `this.participant` à `null` — le premier venait de le vider — et le second

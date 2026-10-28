@@ -116,7 +116,11 @@ l'identifiant réservé `homey:weather` et liée par le hub comme un capteur `me
 même contrat de lecture, même seuil de fraîcheur (2 h). Une seule requête pour toute l'app, au plus
 toutes les 10 min et seulement tant qu'un thermostat la désigne, au battement de l'ordonnanceur.
 La lecture est datée de l'observation (`when`) : une météo que Homey ne rafraîchit plus vieillit et
-tombe comme un capteur muet. Sans emplacement ou sans internet : comme sans capteur extérieur.
+tombe comme un capteur muet ; une réponse sans `when` lisible est rejetée, pas datée à la requête.
+`temperatureCelsius` d'abord ; `temperature` seule n'est prise qu'en °C. Après un échec (souvent la
+première requête, partie avant l'API), nouvel essai au bout d'1 min, et dès la connexion du hub ;
+requête abandonnée après 30 s. Sans emplacement ou sans internet : comme sans capteur extérieur, et
+la source apparaît indisponible. La météo n'est acceptée QUE comme source extérieure.
 Code : `lib/weather.mts`, `runtime/weather.mts`.
 
 ### 2.1bis Groupe d'émetteurs — plusieurs têtes pour une pièce

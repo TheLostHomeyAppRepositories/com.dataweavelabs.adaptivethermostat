@@ -8,6 +8,6 @@ s'occupe du reste.
 Il fonctionne avec n'importe quel capteur de température et n'importe quel émetteur déjà
 appairé à votre Homey, quelle que soit l'app dont ils viennent, et il s'améliore à chaque
 appareil facultatif que vous lui confiez : un contact d'ouverture, un détecteur de mouvement
-ou de présence, un thermomètre extérieur, un relais qui démarre votre chaudière. Il exige un
+ou de présence, un thermomètre extérieur (ou la météo de Homey), un relais qui démarre votre chaudière. Il exige un
 Homey Pro, parce que lire et piloter des appareils appartenant à d'autres apps demande une
 permission que Homey Cloud n'offre pas.

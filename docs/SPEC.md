@@ -105,10 +105,19 @@ supplément, pas une béquille.
 |---|---|---|
 | Capteur de température de pièce | oui | `measure_temperature` d'un device Homey quelconque |
 | Émetteur sous-jacent | oui (**1 à 8**, voir §2.1bis) | device portant `target_temperature` (+ éventuellement l'ouverture de vanne), ou un `onoff` de classe chauffante |
-| Capteur de température extérieure | non | alimente le terme `coef_ext` du TPI |
+| Capteur de température extérieure | non | alimente le terme `coef_ext` du TPI ; ou **Météo de Homey** (voir sous le tableau) |
 | Capteur d'ouverture (fenêtre/porte) | non | `alarm_contact` — mode capteur de la détection fenêtre |
 | Capteur de mouvement | non | `alarm_motion` — preset Activité |
 | Capteur de présence | non | `alarm_motion`/`onoff` global au logement |
+
+**Météo de Homey.** La liste du capteur extérieur propose en tête « Météo de Homey (internet) » :
+la température de `ManagerWeather.getWeather()` pour l'emplacement du Homey. Elle est stockée sous
+l'identifiant réservé `homey:weather` et liée par le hub comme un capteur `measure_temperature` —
+même contrat de lecture, même seuil de fraîcheur (2 h). Une seule requête pour toute l'app, au plus
+toutes les 10 min et seulement tant qu'un thermostat la désigne, au battement de l'ordonnanceur.
+La lecture est datée de l'observation (`when`) : une météo que Homey ne rafraîchit plus vieillit et
+tombe comme un capteur muet. Sans emplacement ou sans internet : comme sans capteur extérieur.
+Code : `lib/weather.mts`, `runtime/weather.mts`.
 
 ### 2.1bis Groupe d'émetteurs — plusieurs têtes pour une pièce
 

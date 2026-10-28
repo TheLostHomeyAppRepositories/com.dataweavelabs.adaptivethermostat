@@ -176,5 +176,8 @@
       "unknown_preset": "Onbekend preset.",
       "invalid_time": "Ongeldige tijd. Gebruik UU:MM."
     }
+  },
+  "weather": {
+    "source_name": "Homey-weer (internet)"
   }
 }

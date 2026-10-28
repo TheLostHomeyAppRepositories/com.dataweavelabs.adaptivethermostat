@@ -176,5 +176,8 @@
       "unknown_preset": "Unknown preset.",
       "invalid_time": "Invalid time. Use HH:MM."
     }
+  },
+  "weather": {
+    "source_name": "Homey weather (internet)"
   }
 }

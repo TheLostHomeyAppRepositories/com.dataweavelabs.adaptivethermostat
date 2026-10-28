@@ -14,6 +14,8 @@ import { EventEmitter } from 'node:events';
 import type Homey from 'homey';
 import { HomeyAPI } from 'homey-api';
 import { matchesCapability } from '../lib/capabilityMatch.mjs';
+import { WEATHER_SOURCE_ID } from '../lib/weather.mjs';
+import { WeatherFeed } from './weather.mjs';
 
 import { computeStale, deviceReportedAtMs, resolveTimestamp, toEpochMs } from '../lib/freshness.mjs';
 import { shouldWrite } from '../lib/writePolicy.mjs';
@@ -118,6 +120,8 @@ interface ApiManagerZones {
 interface HomeyApiClient {
   devices: ApiManagerDevices;
   zones: ApiManagerZones;
+  /** Météo de l'emplacement du Homey. Absente d'une API trop ancienne : voir `WeatherFeed`. */
+  weather?: { getWeather(): Promise<unknown> };
   on(event: string, fn: (...args: unknown[]) => void): unknown;
   destroy(): void;
 }
@@ -441,10 +445,21 @@ export class HomeyApiHub {
   readonly log: Logger;
   readonly logError: Logger;
 
+  /** La météo de Homey, servie aux thermostats qui la désignent comme source extérieure. */
+  readonly weather: WeatherFeed;
+
   constructor(private readonly homey: HomeyInstance, options: HomeyApiHubOptions = {}) {
     this.events.setMaxListeners(0);
     this.log = options.log ?? (() => undefined);
     this.logError = options.error ?? (() => undefined);
+    this.weather = new WeatherFeed({
+      fetch: async () => {
+        const weather = this.api?.weather;
+        if (weather === undefined) throw new Error('API météo indisponible');
+        return weather.getWeather();
+      },
+      error: (...args) => this.logError(...args),
+    });
   }
 
   /** @internal Utilisé par les liaisons pour se ré-abonner. */
@@ -618,6 +633,9 @@ export class HomeyApiHub {
     capabilityId: string,
     onChange?: (reading: Reading<CapValue>) => void,
   ): SourceBinding {
+    // La météo n'est pas un appareil : elle a sa propre liaison, au même contrat.
+    if (deviceId === WEATHER_SOURCE_ID) return this.weather.bind(onChange);
+
     const binding = new Binding(this, deviceId, capabilityId, onChange);
     this.bindings.add(binding);
 
@@ -648,7 +666,10 @@ export class HomeyApiHub {
    * Ne lève jamais : le tick de l'ordonnanceur ne doit pas tomber parce que le réseau a hoqueté.
    */
   async refresh(nowMs: number): Promise<void> {
-    if (this.stopped || !this.connected) return;
+    if (this.stopped) return;
+    // Avant le plancher des appareils : la météo a le sien, et ne dépend pas du websocket.
+    void this.weather.maybeFetch(nowMs);
+    if (!this.connected) return;
     if (this.refreshInFlight !== null) return;
     if (nowMs - this.lastRefreshAtMs < REFRESH_MIN_INTERVAL_MS) return;
 
@@ -699,6 +720,10 @@ export class HomeyApiHub {
   }
 
   async getDeviceSummary(deviceId: string): Promise<DeviceSummary | null> {
+    // Un résumé synthétique : le nom affiché dans les réglages et la page de sources, et la
+    // capability que la liaison extérieure cherche, sans cas particulier chez les appelants.
+    if (deviceId === WEATHER_SOURCE_ID) return this.weatherSummary();
+
     const api = this.api;
     if (api === null) return null;
 
@@ -713,6 +738,21 @@ export class HomeyApiHub {
       // Device supprimé ou API muette : l'absence est une réponse valide, pas une erreur.
       return null;
     }
+  }
+
+  /** La météo, présentée comme un capteur de température sans pièce. */
+  weatherSummary(): DeviceSummary {
+    return {
+      id: WEATHER_SOURCE_ID,
+      name: this.homey.__('weather.source_name'),
+      zoneName: null,
+      class: 'sensor',
+      capabilities: ['measure_temperature'],
+      setable: {},
+      available: true,
+      driverUri: null,
+      reportedAtMs: this.weather.reading?.atMs ?? null,
+    };
   }
 
   /**
@@ -787,6 +827,7 @@ export class HomeyApiHub {
       binding.destroy();
     }
     this.bindings.clear();
+    this.weather.stop();
 
     const api = this.api;
     this.api = null;

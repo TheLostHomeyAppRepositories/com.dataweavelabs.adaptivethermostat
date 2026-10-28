@@ -33,7 +33,7 @@ import type {
 import { formatLocalHhMm, nextOccurrenceMs } from '../../lib/localTime.mjs';
 import { fitOutdoorRateModel, predictRate } from '../../lib/preheat.mjs';
 import { isWeatherMisused } from '../../lib/weather.mjs';
-import { DEFAULT_PRESENCE_OFF_DELAY_MIN, isPresenceMisused } from '../../lib/presence.mjs';
+import { DEFAULT_PRESENCE_OFF_DELAY_MIN, isPresenceMisused, PRESENCE_SOURCE_ID } from '../../lib/presence.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { CapValue } from '../../runtime/hub.mjs';
 import { HomeyEmitterAdapter, type EmitterAdapter } from '../../runtime/emitter.mjs';
@@ -392,8 +392,12 @@ export default class VThermDevice extends Homey.Device {
   isSomeoneHome(): boolean {
     if (this.participant !== null) return this.participant.isSomeoneHome(Date.now());
     if (this.presenceOverride !== 'auto') return this.presenceOverride === 'home';
-    // Pas encore de participant (démarrage) : rien ne régule encore, personne n'est déclaré absent.
-    return true;
+
+    // Pas encore de participant (démarrage) : la lecture brute du capteur, sans délai ni activité
+    // — ce que disait la condition avant eux. Absente ou périmée, elle ne déclare personne absent.
+    const reading = this.sources.presence?.read(Date.now(), FRESHNESS.presenceMs) ?? null;
+    if (reading === null || reading.stale) return true;
+    return reading.value !== false && reading.value !== 0;
   }
 
   // --- Cartes Flow : actions --------------------------------------------------
@@ -859,7 +863,8 @@ export default class VThermDevice extends Homey.Device {
       resolved,
       () => {
         this.app.requestTick(`${this.deviceId()}:${key}`);
-        if (key === 'motion' || key === 'presence') this.app.noteActivity();
+        // La présence de Homey n'est pas une activité dans la maison : seuls les vrais détecteurs.
+        if ((key === 'motion' || key === 'presence') && deviceId !== PRESENCE_SOURCE_ID) this.app.noteActivity();
       },
     );
     this.app.requestTick(`${this.deviceId()}:${key}:bound`);

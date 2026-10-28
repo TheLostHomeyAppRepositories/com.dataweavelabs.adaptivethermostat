@@ -36,6 +36,34 @@ export const PRESENCE_FETCH_TIMEOUT_MS = 30_000;
  */
 export const DEFAULT_PRESENCE_OFF_DELAY_MIN = 60;
 
+/**
+ * Au-delà, un détecteur resté sur « quelqu'un » sans changer n'est plus cru : pile morte, chat
+ * devant un radar. Sans borne, il retiendrait l'absence de la présence de Homey pendant les sept
+ * jours du seuil de fraîcheur — tout le congé d'une famille partie, chauffé au Confort. Douze heures
+ * dépassent une soirée ou une nuit devant un mmWave sans le moindre changement d'état.
+ */
+export const ACTIVITY_STUCK_MS = 12 * 60 * 60_000;
+
+/**
+ * Seule capability de présence qui ne dit QUE le mouvement : celle-là retombe dès que personne ne
+ * bouge et demande le délai avant absence. Un `alarm_presence` ou `alarm_occupancy` — mmWave,
+ * appareil virtuel « quelqu'un à la maison » piloté par géofence, état d'une alarme — dit déjà la
+ * présence, et son absence s'applique tout de suite, comme avant le délai.
+ */
+export const MOTION_ONLY_CAPABILITY = 'alarm_motion';
+
+/**
+ * Dernière activité qu'une lecture de détecteur atteste : l'instant où il est retombé, ou
+ * maintenant s'il voit quelqu'un — borné par `ACTIVITY_STUCK_MS` depuis son dernier changement.
+ * `null` si le détecteur n'a rien rapporté. Une lecture périmée compte encore : un détecteur
+ * hors ligne garde la dernière activité qu'il a vue, il ne l'efface pas.
+ */
+export function detectorActivityAtMs(reading: Reading<boolean> | null, nowMs: number): number | null {
+  if (reading === null) return null;
+  if (!reading.value) return reading.atMs;
+  return Math.min(nowMs, reading.atMs + ACTIVITY_STUCK_MS);
+}
+
 /** La présence de Homey ne peut tenir lieu QUE de source de présence. */
 export function isPresenceMisused(sourceKey: string, deviceId: string | null): boolean {
   return deviceId === PRESENCE_SOURCE_ID && sourceKey !== 'presence';
@@ -47,6 +75,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Quelqu'un est-il à la maison, d'après une réponse `users.getUsers()` ? Daté à la requête.
+ *
+ * Limite connue : un utilisateur actif resté « à la maison » — téléphone perdu, géolocalisation
+ * coupée après un dernier passage chez soi — garde le logement présent. Homey n'expose pas l'âge
+ * de cette information ; c'est à l'utilisateur de désactiver un compte qui ne sert plus.
  *
  * Présent dès qu'UN utilisateur actif est géolocalisé à la maison. `null` quand la réponse ne dit
  * rien d'exploitable — aucun utilisateur actif portant un `present` booléen : on ne déclare pas un

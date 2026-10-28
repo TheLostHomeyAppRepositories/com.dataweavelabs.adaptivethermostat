@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  holdAbsence, isPresenceMisused, parseUsersPresence, PRESENCE_SOURCE_ID,
+  ACTIVITY_STUCK_MS, detectorActivityAtMs, holdAbsence, isPresenceMisused, parseUsersPresence, PRESENCE_SOURCE_ID,
 } from '../lib/presence.mjs';
 
 const MIN = 60_000;
@@ -74,4 +74,19 @@ test('présent, périmé ou sans lecture : rien à retenir', () => {
   assert.deepEqual(holdAbsence(present, NOW, 60 * MIN), { reading: present, wakeUpAtMs: null });
   assert.deepEqual(holdAbsence(stale, NOW, 60 * MIN), { reading: stale, wakeUpAtMs: null });
   assert.deepEqual(holdAbsence(null, NOW, 60 * MIN), { reading: null, wakeUpAtMs: null });
+});
+
+test('activité d\'un détecteur : retombé, voyant, bloqué, périmé ou muet', () => {
+  assert.equal(detectorActivityAtMs({ value: false, atMs: NOW - 5 * MIN, stale: false }, NOW), NOW - 5 * MIN);
+  assert.equal(detectorActivityAtMs({ value: true, atMs: NOW - 5 * MIN, stale: false }, NOW), NOW);
+  assert.equal(
+    detectorActivityAtMs({ value: true, atMs: NOW - 2 * ACTIVITY_STUCK_MS, stale: false }, NOW),
+    NOW - ACTIVITY_STUCK_MS,
+    'un « quelqu\'un » figé cesse de compter douze heures après son dernier changement',
+  );
+  assert.equal(
+    detectorActivityAtMs({ value: false, atMs: NOW - 5 * MIN, stale: true }, NOW), NOW - 5 * MIN,
+    'hors ligne, il garde la dernière activité vue au lieu de l\'effacer',
+  );
+  assert.equal(detectorActivityAtMs(null, NOW), null);
 });

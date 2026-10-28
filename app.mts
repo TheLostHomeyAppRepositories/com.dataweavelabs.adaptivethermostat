@@ -220,13 +220,13 @@ export default class VThermApp extends Homey.App {
   /**
    * Un détecteur a changé d'état. Son thermostat tique de toute façon ; ceux qui suivent la présence
    * de Homey doivent aussi le voir — un mouvement dans la chambre des enfants ramène la présence
-   * au salon. Raison GLOBALE, donc tout le monde tique, mais seulement si quelqu'un en dépend.
+   * au salon. Raison NOMMÉE pour chacun d'eux seulement : une raison globale ferait recalculer tout
+   * le logement à chaque mouvement, la charge que `targetsFor` existe pour éviter.
    */
   noteActivity(): void {
     for (const participant of this.vtherms.values()) {
       if (participant.followsHouseActivity) {
-        this.schedulerImpl?.requestTick('house-activity');
-        return;
+        this.schedulerImpl?.requestTick(`${participant.tickId}:house-activity`);
       }
     }
   }

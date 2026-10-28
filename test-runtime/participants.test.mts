@@ -557,6 +557,7 @@ test('un radar immobile depuis dix minutes ne vide pas le logement, et le révei
   const nowMs = 3 * 60 * MIN;
   // Le radar sert de présence : il retombe à faux dès que personne ne bouge.
   const presence = new FakeBinding(false, nowMs - 10 * MIN);
+  presence.capabilityId = 'alarm_motion';
   const { host, room, participant } = world('valve', { presence });
 
   room.setReading(19, nowMs);
@@ -572,6 +573,22 @@ test('un radar immobile depuis dix minutes ne vide pas le logement, et le révei
   await participant.tick(nowMs + 50 * MIN);
   assert.equal(host.getCapabilityValue('vtherm_presence'), false, 'au bout d\'une heure sans détection, l\'absence s\'applique');
   assert.equal(participant.isSomeoneHome(nowMs + 50 * MIN), false);
+});
+
+test('un vrai capteur de présence (géofence virtuelle, mmWave) déclare l\'absence sans délai', async () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  const presence = new FakeBinding(false, nowMs - MIN);
+  presence.capabilityId = 'alarm_presence';
+  const { host, room, participant } = world('valve', { presence });
+
+  room.setReading(19, nowMs);
+  await participant.tick(nowMs);
+
+  assert.equal(
+    host.getCapabilityValue('vtherm_presence'), false,
+    'seul un détecteur de MOUVEMENT retombe dès que personne ne bouge ; une présence fiable ne doit pas attendre une heure',
+  );
 });
 
 test('la présence de Homey déclare l\'absence sans délai', async () => {
@@ -628,6 +645,37 @@ test('personne de géolocalisé mais la nounou bouge dans la chambre : pas d\'ab
   assert.equal(host.getCapabilityValue('vtherm_presence'), false);
 });
 
+test('un détecteur illisible garde sa dernière activité, et un détecteur jamais lu compte à la création', () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  const motion = new FakeBinding(false, nowMs - 5 * MIN);
+  const { participant } = world('valve', { motion });
+  assert.equal(participant.lastActivityAtMs(nowMs), nowMs - 5 * MIN);
+
+  // Coupure Zigbee : plus aucune lecture. La nounou n'est pas partie pour autant.
+  motion.silence();
+  assert.equal(participant.lastActivityAtMs(nowMs + MIN), nowMs - 5 * MIN);
+
+  // Démarrage : la liaison n'est pas encore rattachée, aucune lecture n'a jamais eu lieu.
+  const fresh = new FakeBinding();
+  const { participant: booting } = world('valve', { motion: fresh });
+  assert.equal(booting.lastActivityAtMs(nowMs), 0, 'compte comme actif à la création (nowMs: 0 dans `world`)');
+});
+
+test('un détecteur bloqué sur « quelqu\'un » ne retient la maison que douze heures', () => {
+  const HOUR = 60 * 60_000;
+  const nowMs = 100 * HOUR;
+  const motion = new FakeBinding(true, nowMs - 2 * HOUR);
+  const { participant } = world('valve', { motion });
+  assert.equal(participant.lastActivityAtMs(nowMs), nowMs, 'deux heures de présence : actif maintenant');
+
+  motion.setReading(true, nowMs - 3 * 24 * HOUR);
+  assert.equal(
+    participant.lastActivityAtMs(nowMs), nowMs - 3 * 24 * HOUR + 12 * HOUR,
+    'pile morte ou chat : sans borne, la famille partie en congé chaufferait au Confort une semaine',
+  );
+});
+
 test('l\'activité d\'un thermostat : maintenant si son détecteur voit, sinon l\'instant où il est retombé', () => {
   const MIN = 60_000;
   const nowMs = 3 * 60 * MIN;
@@ -647,6 +695,7 @@ test('un délai de zéro rend le comportement d\'avant', async () => {
   const MIN = 60_000;
   const nowMs = 3 * 60 * MIN;
   const presence = new FakeBinding(false, nowMs - MIN);
+  presence.capabilityId = 'alarm_motion';
   const { host, room, participant } = world('valve', { presence });
   participant.updateConfig({ ...CONFIG, presenceOffDelayMin: 0 });
 

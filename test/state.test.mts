@@ -323,3 +323,65 @@ test('lastOnPercent : relu tel quel, borné, et jamais NaN', () => {
   assert.equal(restored('0.74'), 0);
   assert.equal(restored(null), 0);
 });
+
+// --- Préchauffe (SPEC §14) ---------------------------------------------------
+
+test('préchauffe, critère 14 : un état sans champs de préchauffe prend les défauts', () => {
+  const raw = { ...createPersistentState(0, { preset: 'comfort', manualSetpoint: 19 }) } as Record<string, unknown>;
+  delete raw.preheatTargets;
+  delete raw.preheatLearning;
+  const migrated = migratePersistentState(raw, 0, { preset: 'comfort', manualSetpoint: 19 });
+  assert.deepEqual(migrated.preheatTargets, []);
+  assert.equal(migrated.preheatLearning.accepted, 0);
+  assert.equal(migrated.preheatLearning.ratePerHour, 1);
+});
+
+test('préchauffe, critère 14 : cibles corrompues filtrées une par une, au plus 4, triées', () => {
+  const now = 100 * 3_600_000;
+  const raw = {
+    ...createPersistentState(now, { preset: 'comfort', manualSetpoint: 19 }),
+    preheatTargets: [
+      { preset: 'comfort', atMs: now + 5 },
+      { preset: 'activity', atMs: now + 6 },
+      { preset: 'eco', atMs: Number.NaN },
+      'n\'importe quoi',
+      { preset: 'boost', atMs: now + 1 },
+      { preset: 'eco', atMs: now + 2 },
+      { preset: 'frost', atMs: now + 3 },
+      { preset: 'comfort', atMs: now + 4 },
+    ],
+  };
+  const migrated = migratePersistentState(raw, now, { preset: 'comfort', manualSetpoint: 19 });
+  assert.deepEqual(migrated.preheatTargets.map((t) => t.atMs), [now + 1, now + 2, now + 3, now + 4]);
+});
+
+test('préchauffe, critère 14 : cible dépassée de 13 h jetée, de 2 h conservée', () => {
+  const now = 100 * 3_600_000;
+  const raw = {
+    ...createPersistentState(now, { preset: 'comfort', manualSetpoint: 19 }),
+    preheatTargets: [
+      { preset: 'comfort', atMs: now - 13 * 3_600_000 },
+      { preset: 'eco', atMs: now - 2 * 3_600_000 },
+    ],
+  };
+  const migrated = migratePersistentState(raw, now, { preset: 'comfort', manualSetpoint: 19 });
+  assert.deepEqual(migrated.preheatTargets, [{ preset: 'eco', atMs: now - 2 * 3_600_000 }]);
+});
+
+test('préchauffe : un apprentissage corrompu retombe sur les défauts champ par champ', () => {
+  const raw = {
+    ...createPersistentState(0, { preset: 'comfort', manualSetpoint: 19 }),
+    preheatLearning: {
+      deadTimeMin: Number.NaN, ratePerHour: 0, accepted: 4, rejected: -2, lastRejectReason: 'inventé',
+      plateauTemp: 20.4, history: [{ atMs: 1, ratePerHour: 1.2, deadTimeMin: 9, outdoorMean: null }, null],
+    },
+  };
+  const learning = migratePersistentState(raw, 0, { preset: 'comfort', manualSetpoint: 19 }).preheatLearning;
+  assert.equal(learning.deadTimeMin, 15);
+  assert.equal(learning.ratePerHour, 1, 'une vitesse nulle ferait une avance infinie');
+  assert.equal(learning.accepted, 4);
+  assert.equal(learning.rejected, 0);
+  assert.equal(learning.lastRejectReason, null);
+  assert.equal(learning.plateauTemp, 20.4);
+  assert.equal(learning.history.length, 1);
+});

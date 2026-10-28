@@ -37,6 +37,7 @@ const VTHERM_EVENT_CARDS: Record<string, string | null> = {
   sensor_quiet: 'sensor_went_quiet',
   /** Retour à la normale d'un avertissement : il lève le bandeau, il n'annonce rien. */
   sensor_recovered: null,
+  preheat_started: 'preheat_started',
 };
 
 const CENTRAL_EVENT_CARDS: Record<string, string | null> = {
@@ -120,4 +121,51 @@ test('aucune carte déclarée ne reste orpheline, aucun déclenchement ne vise l
     assert.deepEqual(declared, fired,
       `${driverId} : cartes déclarées et cartes déclenchées divergent`);
   }
+});
+
+// --- Actions et conditions : déclarées ET écoutées --------------------------
+
+/** Identifiants d'actions ou de conditions déclarés pour ce driver. */
+function declaredCards(driverId: string, kind: 'actions' | 'conditions'): string[] {
+  const raw = readFileSync(join(process.cwd(), 'drivers', driverId, 'driver.flow.compose.json'), 'utf8');
+  const parsed = JSON.parse(raw) as Record<string, { id: string }[] | undefined>;
+  return (parsed[kind] ?? []).map((card) => card.id);
+}
+
+/** Identifiants dont le driver enregistre réellement l'écouteur. */
+function listenedCards(driverId: string, getter: 'getActionCard' | 'getConditionCard'): string[] {
+  const source = readFileSync(join(process.cwd(), 'drivers', driverId, 'driver.mts'), 'utf8');
+  const calls = source.matchAll(new RegExp(`${getter}\\(\\s*'([a-z_]+)'`, 'g'));
+  return [...new Set([...calls].map((m) => m[1] as string))];
+}
+
+test('toute action et toute condition déclarée a son écouteur, et réciproquement', () => {
+  // Une action déclarée sans écouteur s'affiche dans l'éditeur et échoue à chaque exécution ; une
+  // condition sans écouteur rend toujours faux. Le cas visé à sa création : les cartes de
+  // préchauffe, ajoutées en un seul lot sur quatre fichiers.
+  assert.deepEqual(
+    declaredCards('vtherm', 'actions').sort(),
+    listenedCards('vtherm', 'getActionCard').sort(),
+    'vtherm : actions déclarées et écoutées divergent',
+  );
+  assert.deepEqual(
+    declaredCards('vtherm', 'conditions').sort(),
+    listenedCards('vtherm', 'getConditionCard').sort(),
+    'vtherm : conditions déclarées et écoutées divergent',
+  );
+  for (const id of ['reach_preset_at', 'cancel_preheat']) {
+    assert.ok(declaredCards('vtherm', 'actions').includes(id), `action ${id} absente`);
+  }
+  assert.ok(declaredCards('vtherm', 'conditions').includes('preheat_pending'));
+});
+
+test('les cartes de préchauffe sont dans le manifeste compilé app.json', () => {
+  const app = JSON.parse(readFileSync(join(process.cwd(), 'app.json'), 'utf8')) as {
+    flow: Record<string, { id: string }[]>;
+  };
+  const ids = (kind: string): string[] => (app.flow[kind] ?? []).map((card) => card.id);
+  assert.ok(ids('triggers').includes('preheat_started'));
+  assert.ok(ids('conditions').includes('preheat_pending'));
+  assert.ok(ids('actions').includes('reach_preset_at'));
+  assert.ok(ids('actions').includes('cancel_preheat'));
 });

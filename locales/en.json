@@ -134,7 +134,23 @@
       "regulation_hint": "A radiator valve measures the radiator, not the room — it reads warm and closes too early. Self-regulation offsets the setpoint sent to it so the room reaches your target. It needs an outdoor temperature sensor: without one, no offset is applied at all.",
       "safety_hint": "A flat battery in January would otherwise leave the room unheated until someone notices: the app refuses to compute on a frozen reading, so it stops asking for heat. Instead, it keeps a minimum going until the sensor comes back — and gives up after the delay below, because a boiler running for days on a dead sensor is a bigger risk than the frost it was avoiding.",
       "tpi_hint": "This is what separates a real thermostat from a bimetallic strip. Instead of switching fully on and fully off, the app computes how much heat the room actually needs and delivers exactly that. The defaults suit a normally insulated room; change them only if you observe a problem.",
-      "window_hint": "Two ways to notice, and they are mutually exclusive. A contact sensor is immediate and reliable. Detection by temperature drop needs no sensor at all but reacts more slowly, and only once the app has enough readings to measure a slope."
+      "window_hint": "Two ways to notice, and they are mutually exclusive. A contact sensor is immediate and reliable. Detection by temperature drop needs no sensor at all but reacts more slowly, and only once the app has enough readings to measure a slope.",
+      "preheat_hint": "Use the Flow card « Reach a preset at a time » instead of « Set the preset » to be warm on time: the thermostat starts heating early, by however long this room needs. It learns that on its own from every rise it observes — the daily switch from Eco to Comfort is enough. Until three rises have been measured, it assumes a slow room and never starts more than 90 minutes early."
+    },
+    "preheat": {
+      "status_none": "Nothing measured yet: preheating assumes {rate} °C per hour and {dead} minutes to get going.",
+      "status_rejected": "No usable rise yet ({rejected} discarded, last reason: {reason}). Preheating uses its cautious defaults.",
+      "status_learned": "Rises at {rate} °C/h after {dead} min to get going — {accepted} rises measured, {rejected} discarded.",
+      "status_capped": "Lead still capped at {cap} min until {n} rises are measured.",
+      "status_plateau": "The last rise levelled off at {temp} °C, below the setpoint: the room may not reach it.",
+      "status_excluded": "Not learning: the room sensor is one of the heads, which measures at the radiator, not in the room. Link a separate room sensor to enable it.",
+      "reason_interrupted": "heating was switched off or lowered during the rise",
+      "reason_sensor": "the room sensor went quiet",
+      "reason_demand": "the room did not actually call for heat",
+      "reason_too_long": "the rise took more than {hours} hours",
+      "reason_too_small": "the rise was too small",
+      "reason_rate": "the speed was implausible",
+      "reason_coarse": "the sensor reports too coarsely to time the rise"
     }
   },
   "device": {
@@ -148,12 +164,16 @@
       "valve_stuck": "The Zigbee2MQTT backbone went away and the valve stayed at its last opening: the room may not heat whatever the setpoint says. Regulation continues by setpoint.",
       "emitter_mismatch": "One of this room's heaters is no longer being driven: it came back reporting a different kind of control, and it is now sitting wherever it was last left. The room will heat at a fraction of its power until it returns or you repair the thermostat.",
       "emitter_silent": "This room's heater has not reported a single reading for more than two days, although it still looks reachable: the app's setpoints are probably no longer reaching it. The boiler is no longer started for this room. Re-pair it, then repair this thermostat to link it again."
+    },
+    "preheat": {
+      "full": "This thermostat already has {max} scheduled preheats. Cancel them or wait for one to pass."
     }
   },
   "flow": {
     "error": {
       "unknown_presence": "Unknown presence value.",
-      "unknown_preset": "Unknown preset."
+      "unknown_preset": "Unknown preset.",
+      "invalid_time": "Invalid time. Use HH:MM."
     }
   }
 }

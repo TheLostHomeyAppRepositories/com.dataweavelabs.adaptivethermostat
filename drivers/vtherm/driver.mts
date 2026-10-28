@@ -11,6 +11,7 @@ import Homey from 'homey';
 
 import { DEFAULT_WINDOW } from '../../lib/constants.mjs';
 import type { Preset } from '../../lib/types.mjs';
+import { PREHEAT_PRESETS } from '../../lib/preheat.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { PresenceOverride } from '../../runtime/participants.mjs';
 import type VThermApp from '../../app.mjs';
@@ -370,6 +371,10 @@ export default class VThermDriver extends Homey.Driver {
     this.homey.flow.getConditionCard('someone_is_home').registerRunListener(
       async (args: { device: VThermDevice }) => args.device.isSomeoneHome(),
     );
+
+    this.homey.flow.getConditionCard('preheat_pending').registerRunListener(
+      async (args: { device: VThermDevice }) => args.device.hasPendingPreheat(),
+    );
   }
 
   private registerActions(): void {
@@ -388,6 +393,20 @@ export default class VThermDriver extends Homey.Driver {
     this.homey.flow.getActionCard('cancel_timed_preset').registerRunListener(
       async (args: { device: VThermDevice }) => {
         args.device.cancelTimedPreset();
+      },
+    );
+
+    this.homey.flow.getActionCard('reach_preset_at').registerRunListener(
+      async (args: { device: VThermDevice; preset: string; time: string }) => {
+        const preset = PREHEAT_PRESETS.find((value) => value === args.preset);
+        if (preset === undefined) throw new Error(this.homey.__('flow.error.unknown_preset'));
+        args.device.applyPreheatTarget(preset, args.time);
+      },
+    );
+
+    this.homey.flow.getActionCard('cancel_preheat').registerRunListener(
+      async (args: { device: VThermDevice }) => {
+        args.device.cancelPreheat();
       },
     );
 

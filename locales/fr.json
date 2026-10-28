@@ -134,7 +134,23 @@
       "regulation_hint": "Une vanne mesure le radiateur, pas la pièce — elle lit chaud et ferme trop tôt. L'auto-régulation décale la consigne qu'on lui envoie pour que la pièce atteigne votre cible. Elle exige un capteur de température extérieure : sans lui, aucun offset n'est appliqué.",
       "safety_hint": "Une pile morte en janvier laisserait sinon la pièce sans chauffage jusqu'à ce que quelqu'un s'en aperçoive : l'app refuse de calculer sur une mesure figée, donc elle cesse de demander de la chaleur. À la place, elle maintient un minimum jusqu'au retour du capteur — et abandonne au bout du délai ci-dessous, parce qu'une chaudière qui tourne des jours sur un capteur mort est un risque plus grand que le gel qu'on évitait.",
       "tpi_hint": "C'est ce qui sépare un vrai thermostat d'un bilame. Au lieu de basculer à fond puis rien, l'app calcule la puissance dont la pièce a réellement besoin et ne délivre que celle-là. Les valeurs par défaut conviennent à une pièce normalement isolée ; ne les changez qu'en cas de problème observé.",
-      "window_hint": "Deux façons de s'en apercevoir, et elles s'excluent. Un contact d'ouverture est immédiat et fiable. La détection par chute de température ne demande aucun capteur mais réagit plus lentement, et seulement une fois que l'app a assez de mesures pour calculer une pente."
+      "window_hint": "Deux façons de s'en apercevoir, et elles s'excluent. Un contact d'ouverture est immédiat et fiable. La détection par chute de température ne demande aucun capteur mais réagit plus lentement, et seulement une fois que l'app a assez de mesures pour calculer une pente.",
+      "preheat_hint": "Utilisez la carte Flow « Atteindre un preset à une heure » à la place de « Régler le preset » pour avoir chaud à l'heure : le thermostat démarre la chauffe en avance, du temps dont cette pièce a besoin. Il l'apprend tout seul à chaque remontée observée — le passage quotidien d'Éco à Confort suffit. Tant que trois remontées n'ont pas été mesurées, il suppose une pièce lente et ne démarre jamais plus de 90 minutes en avance."
+    },
+    "preheat": {
+      "status_none": "Rien de mesuré pour l'instant : la préchauffe suppose {rate} °C par heure et {dead} minutes de mise en route.",
+      "status_rejected": "Aucune remontée exploitable pour l'instant ({rejected} écartées, dernier motif : {reason}). La préchauffe utilise ses valeurs prudentes.",
+      "status_learned": "Monte de {rate} °C/h après {dead} min de mise en route — {accepted} remontées mesurées, {rejected} écartées.",
+      "status_capped": "Avance encore plafonnée à {cap} min jusqu'à {n} remontées mesurées.",
+      "status_plateau": "La dernière remontée a plafonné à {temp} °C, sous la consigne : la pièce risque de ne pas l'atteindre.",
+      "status_excluded": "Pas d'apprentissage : le capteur de pièce est l'une des têtes, qui mesure au radiateur et non dans la pièce. Liez un capteur de pièce séparé pour l'activer.",
+      "reason_interrupted": "la chauffe a été coupée ou abaissée pendant la remontée",
+      "reason_sensor": "le capteur de pièce s'est tu",
+      "reason_demand": "la pièce n'a pas réellement demandé de chaleur",
+      "reason_too_long": "la remontée a duré plus de {hours} heures",
+      "reason_too_small": "la remontée était trop faible",
+      "reason_rate": "la vitesse était invraisemblable",
+      "reason_coarse": "la sonde rapporte trop grossièrement pour chronométrer la montée"
     }
   },
   "device": {
@@ -148,12 +164,16 @@
       "valve_stuck": "La dorsale Zigbee2MQTT a disparu et la vanne est restée sur sa dernière ouverture : la pièce peut ne pas chauffer, quelle que soit la consigne. La régulation continue par consigne.",
       "emitter_mismatch": "Un des émetteurs de cette pièce n'est plus piloté : il est revenu en annonçant un autre type de commande, et il reste là où on l'a laissé. La pièce chauffera à une fraction de sa puissance tant qu'il n'est pas revenu ou que vous n'avez pas réparé le thermostat.",
       "emitter_silent": "L'émetteur de cette pièce ne remonte plus aucune mesure depuis plus de deux jours, alors qu'il paraît joignable : les consignes de l'app ne lui parviennent sans doute plus. La chaudière n'est plus sollicitée pour cette pièce. Réappairez-le, puis réparez ce thermostat pour le relier à nouveau."
+    },
+    "preheat": {
+      "full": "Ce thermostat a déjà {max} préchauffes programmées. Annulez-les ou attendez qu'une soit passée."
     }
   },
   "flow": {
     "error": {
       "unknown_presence": "Valeur de présence inconnue.",
-      "unknown_preset": "Preset inconnu."
+      "unknown_preset": "Preset inconnu.",
+      "invalid_time": "Heure invalide. Utilisez HH:MM."
     }
   }
 }

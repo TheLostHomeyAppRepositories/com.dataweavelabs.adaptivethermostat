@@ -568,3 +568,57 @@ test('le seuil de la pile est le plus large de la table, celui de la pièce le p
     );
   }
 });
+
+// --- Préchauffe (SPEC §14) ---------------------------------------------------
+
+test('préchauffe, critère 15 : une cible posée est écrite dans le store au pas qui suit, sans attendre', async () => {
+  const { host, room, participant } = world('valve');
+  room.setReading(18, 0);
+  await participant.tick(0);
+
+  participant.addPreheatTarget('comfort', 10 * 3_600_000);
+  await participant.tick(60_000);
+
+  const stored = host.getStoreValue('vtherm.state') as { preheatTargets?: unknown } | undefined;
+  assert.deepEqual(stored?.preheatTargets, [{ preset: 'comfort', atMs: 10 * 3_600_000 }],
+    'l\'intervalle de 5 min aurait laissé un redémarrage perdre la cible');
+});
+
+test('préchauffe, critère 7 : la cinquième cible lève, et la liste reste à quatre', () => {
+  const { participant } = world('valve');
+  for (const hour of [1, 2, 3, 4]) participant.addPreheatTarget('comfort', hour * 3_600_000);
+  assert.throws(() => participant.addPreheatTarget('boost', 5 * 3_600_000), /device\.preheat\.full/);
+  assert.equal(participant.preheatTargets.length, 4);
+});
+
+test('préchauffe, critère 8 : un preset manuel à 05:30 annule la cible de 07:00, pas celui de 22:00 la veille', () => {
+  const at7h = 31 * 3_600_000;
+  const evening = world('valve').participant;
+  evening.addPreheatTarget('comfort', at7h);
+  evening.setPreset('eco', at7h - 9 * 3_600_000);
+  assert.equal(evening.preheatTargets.length, 1);
+
+  const early = world('valve').participant;
+  early.addPreheatTarget('comfort', at7h);
+  early.setManualSetpoint(18, at7h - 90 * 60_000);
+  assert.equal(early.preheatTargets.length, 0);
+});
+
+test('préchauffe : le pas qui bascule déclenche la carte, et l\'apprentissage s\'affiche', async () => {
+  const shown: number[] = [];
+  const { host, room, participant } = world('valve');
+  host.showPreheatStatus = async (learning) => { shown.push(learning.accepted); };
+  // Confort à 19 °C, pièce à 17 : 15 + 2 × 60 = 135 min, plafonnés à 90 — la cible de +30 min est due.
+  room.setReading(17, 0);
+  // Le thermostat de test démarre en Confort : sans passage en Éco, la bascule ne changerait rien
+  // et n'annoncerait donc rien.
+  participant.setPreset('eco', 0);
+
+  participant.addPreheatTarget('comfort', 30 * 60_000);
+  await participant.tick(0);
+
+  assert.ok(host.flows.some((event) => event.kind === 'preheat_started'));
+  assert.deepEqual(shown, [0], 'affiché une fois, au premier pas, puis seulement s\'il change');
+  await participant.tick(60_000);
+  assert.deepEqual(shown, [0]);
+});

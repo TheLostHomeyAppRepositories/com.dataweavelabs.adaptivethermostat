@@ -95,6 +95,59 @@
         "fr": "Se déclenche quand aucune mesure fraîche n'est arrivée depuis trop longtemps. Le thermostat cesse alors de demander de la chaleur plutôt que de réguler sur une valeur morte — c'est votre avertissement qu'une pile est vide.",
         "nl": "Wordt geactiveerd wanneer er te lang geen verse meting is. De thermostaat stopt met warmte vragen."
       }
+    },
+    {
+      "id": "preheat_started",
+      "title": {
+        "en": "Preheating starts",
+        "fr": "La préchauffe démarre",
+        "nl": "Voorverwarmen begint"
+      },
+      "hint": {
+        "en": "Fires when a target set with « Reach a preset at a time » switches its preset ahead of time. The lead tells how many minutes early it started.",
+        "fr": "Se déclenche quand une cible posée avec « Atteindre un preset à une heure » bascule son preset en avance. L'avance dit combien de minutes plus tôt elle a démarré.",
+        "nl": "Wordt geactiveerd wanneer een doel van « Preset bereiken op een tijdstip » het preset vooraf inschakelt. De voorsprong zegt hoeveel minuten eerder het begon."
+      },
+      "tokens": [
+        {
+          "name": "preset",
+          "type": "string",
+          "title": {
+            "en": "Preset",
+            "fr": "Preset",
+            "nl": "Preset"
+          },
+          "example": {
+            "en": "comfort",
+            "fr": "comfort",
+            "nl": "comfort"
+          }
+        },
+        {
+          "name": "lead_minutes",
+          "type": "number",
+          "title": {
+            "en": "Lead (minutes)",
+            "fr": "Avance (minutes)",
+            "nl": "Voorsprong (minuten)"
+          },
+          "example": 45
+        },
+        {
+          "name": "target_time",
+          "type": "string",
+          "title": {
+            "en": "Target time",
+            "fr": "Heure visée",
+            "nl": "Doeltijd"
+          },
+          "example": {
+            "en": "07:00",
+            "fr": "07:00",
+            "nl": "07:00"
+          }
+        }
+      ]
     }
   ],
   "conditions": [
@@ -189,6 +242,14 @@
         "en": "Someone !{{is|is not}} home",
         "fr": "Quelqu'un !{{est|n'est pas}} présent",
         "nl": "Iemand !{{is|is niet}} thuis"
+      }
+    },
+    {
+      "id": "preheat_pending",
+      "title": {
+        "en": "A preheat !{{is|is not}} scheduled",
+        "fr": "Une préchauffe !{{est|n'est pas}} programmée",
+        "nl": "Voorverwarmen !{{is|is niet}} gepland"
       }
     }
   ],
@@ -354,6 +415,76 @@
         "en": "Cancel the timed preset",
         "fr": "Annuler le preset temporisé",
         "nl": "Tijdelijk preset annuleren"
+      }
+    },
+    {
+      "id": "reach_preset_at",
+      "title": {
+        "en": "Reach a preset at a time",
+        "fr": "Atteindre un preset à une heure",
+        "nl": "Preset bereiken op een tijdstip"
+      },
+      "titleFormatted": {
+        "en": "Reach [[preset]] at [[time]]",
+        "fr": "Atteindre [[preset]] à [[time]]",
+        "nl": "[[preset]] bereiken om [[time]]"
+      },
+      "hint": {
+        "en": "Starts heating early enough for the room to be at the preset's temperature at that time, from the rise speed the app measures in this room. Up to 4 targets per thermostat; a manual change in the hours before cancels it.",
+        "fr": "Démarre la chauffe assez tôt pour que la pièce soit à la température du preset à cette heure, d'après la vitesse de montée que l'app mesure dans cette pièce. Jusqu'à 4 cibles par thermostat ; un changement manuel dans les heures qui précèdent l'annule.",
+        "nl": "Begint vroeg genoeg met verwarmen zodat de kamer op dat tijdstip op de presettemperatuur is, op basis van de opwarmsnelheid die de app in deze kamer meet. Tot 4 doelen per thermostaat; een handmatige wijziging in de uren ervoor annuleert het."
+      },
+      "args": [
+        {
+          "name": "preset",
+          "type": "dropdown",
+          "values": [
+            {
+              "id": "frost",
+              "label": {
+                "en": "Frost protection",
+                "fr": "Hors-gel",
+                "nl": "Vorstbeveiliging"
+              }
+            },
+            {
+              "id": "eco",
+              "label": {
+                "en": "Eco",
+                "fr": "Éco",
+                "nl": "Eco"
+              }
+            },
+            {
+              "id": "comfort",
+              "label": {
+                "en": "Comfort",
+                "fr": "Confort",
+                "nl": "Comfort"
+              }
+            },
+            {
+              "id": "boost",
+              "label": {
+                "en": "Boost",
+                "fr": "Boost",
+                "nl": "Boost"
+              }
+            }
+          ]
+        },
+        {
+          "name": "time",
+          "type": "time"
+        }
+      ]
+    },
+    {
+      "id": "cancel_preheat",
+      "title": {
+        "en": "Cancel scheduled preheats",
+        "fr": "Annuler les préchauffes programmées",
+        "nl": "Geplande voorverwarmingen annuleren"
       }
     },
     {

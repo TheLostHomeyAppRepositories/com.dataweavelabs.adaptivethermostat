@@ -20,6 +20,9 @@ export class FakeDeviceHost implements DeviceHost {
   private readonly capabilities = new Map<string, CapValue>();
   private readonly store = new Map<string, unknown>();
 
+  /** Facultatif comme dans le contrat : un test qui veut voir l'état de la préchauffe le pose. */
+  showPreheatStatus?: DeviceHost['showPreheatStatus'];
+
   /** Fait échouer la publication d'une capability précise, pour vérifier que rien ne s'effondre. */
   failPublishOf: string | null = null;
 

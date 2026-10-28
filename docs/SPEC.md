@@ -622,14 +622,15 @@ robinets se ferment. La description de l'app et le réglage doivent le rappeler.
 
 **Déclencheurs** : preset changé · état effectif changé (`vtherm_state`) · fenêtre ouverte/fermée
 détectée · demande de chaleur démarrée/arrêtée · chaudière activée/désactivée · mode central changé ·
-mode sécurité entré/sorti · pourcentage de puissance changé.
+mode sécurité entré/sorti · pourcentage de puissance changé · préchauffe démarrée (§14).
 
 **Conditions** : preset est … · fenêtre est ouverte · quelqu'un est présent · le VTherm demande de la chaleur ·
-la chaudière est active · le mode central est …
+la chaudière est active · le mode central est … · une préchauffe est programmée (§14).
 
 **Actions** : régler le preset · régler le preset pendant N minutes · annuler le preset temporisé ·
 régler la consigne · allumer/éteindre · régler le mode central · ignorer la fenêtre (bypass) ·
-régler les coefficients TPI (équivalent `set_tpi_parameters`) · forcer l'état de présence.
+régler les coefficients TPI (équivalent `set_tpi_parameters`) · forcer l'état de présence ·
+atteindre un preset à une heure · annuler les préchauffes programmées (§14).
 
 Homey ne fabrique de cartes `_changed` automatiques que pour les capabilities dont l'identifiant
 porte un préfixe SYSTÈME (`measure_`, `meter_`, `alarm_`…). Aucune des nôtres n'en porte : toute
@@ -698,3 +699,60 @@ des coefficients), **verrouillage par PIN**, **types `over_switch` et `over_valv
 5. L'ouverture de la fenêtre cuisine coupe la chauffe après le délai, la fermeture la restaure.
 6. La chaudière suit la demande agrégée et ne commute jamais deux fois en moins de 60 s.
 7. Les trois locales `en`/`fr`/`nl` sont complètes.
+
+## 14. Préchauffe anticipée
+
+Demande d'origine : forum Homey, 2026-10-28 — « 22 °C à 7 h : faut-il passer en Confort à 7 h ou
+à 6 h 30 ? ». La carte **« Atteindre [preset] à [HH:MM] »** répond : le thermostat bascule le preset
+assez tôt pour que la pièce y soit à l'heure. Code : `lib/preheat.mts`, `lib/localTime.mts`.
+
+**Cibles.** Jusqu'à 4 par thermostat, triées par échéance ; une cinquième fait échouer la carte (le
+flow s'affiche en échec), même échéance = remplacement. Presets visables : hors-gel, éco, confort,
+boost — `activity` et `none` n'ont pas de température connue à l'avance. L'heure est convertie une
+fois, au lancement de la carte, en instant absolu dans le fuseau du Homey (prochaine occurrence
+strictement future ; heure inexistante décalée vers l'avant, heure ambiguë = première occurrence).
+
+**Bascule.** Dans le pas, AVANT la résolution du preset, toutes les cibles sont évaluées (une cible
+lointaine qui demande plus d'avance n'attend pas derrière une plus proche) ; parmi les cibles dues,
+la plus tardive part et les cibles antérieures tombent avec elle (« Éco à 6 h » rebasculerait sinon
+un Confort de 6 h 30 parti à 4 h 45). Quand `maintenant ≥ échéance − avance`, son preset est appliqué comme un
+`set_preset` (durable, preset temporisé annulé), la cible est retirée, `preheat_started` et
+`preset_changed` partent au même pas — seulement si la bascule change quelque chose. Fenêtre active,
+mode central `stopped`/`frost` ou capteur muet : pas d'avance, bascule à l'heure exacte. Thermostat
+éteint : la cible est consommée à son heure sans toucher au preset — rallumé à 7 h 10 après une
+cible Confort de 7 h, il garde son ancien preset. L'avance annoncée est celle
+réellement prise (nulle au retour d'un arrêt après l'échéance).
+
+**Avance.** Seule une cible qui MONTE la consigne s'anticipe : une cible Éco depuis le Confort, un
+boost ou une consigne manuelle plus haute, bascule à l'heure exacte (consigne courante résolue en
+présence, comme la cible) — sinon une pièce qui plafonne
+sous l'Éco quitterait le Confort en avance. `écart = T(preset en présence) − T(pièce)` ; `avance = écart > 0 ? temps mort +
+écart / vitesse : 0`, bornée à `preheat_max_lead_min` (180 min par défaut), et à 90 min tant que
+moins de 3 remontées ont été apprises. La variante absence est ignorée : la nuit, une présence au
+mouvement vaut souvent « absent » et ferait arriver en retard.
+
+**Annulation.** Tout changement manuel (tuile, `set_preset`, consigne, preset temporisé posé ou
+annulé) annule les cibles dont la fenêtre `[échéance − preset_max_lead_min, échéance]` contient
+l'instant du changement. Les cartes Flow `set_preset` et consigne comptent comme manuelles : un Flow
+« Éco à 6 h » annule « Confort à 7 h ». Après la bascule, la présence s'applique comme d'habitude :
+absent, c'est la variante absence du preset qui est visée.
+
+**Apprentissage.** Toute remontée en régulation nominale est un épisode : début au pas où la
+consigne CHANGE et dépasse la pièce d'au moins 1 °C (un écart qui dure sans changement n'ouvre rien,
+pas d'épisode parasite après un plateau) ; temps mort jusqu'à la première hausse de 0,1 °C vue après
+une demande de chaleur ; fin à consigne − 0,2 °C, ou plateau (aucune nouvelle hausse pendant 45 min,
+montée arrêtée à la première atteinte du maximum). Consigne relevée en route : l'épisode est remplacé
+dans le même pas, sans rejet compté ; abaissée (fenêtre, arrêt central, Éco du soir) : compté
+« interrompu ». Une demande inconnue isolée est neutre. Écarté et compté avec son motif : chauffe
+coupée ou abaissée, capteur muet, aucune demande de chaleur vue de toute la montée, plus de 12 h (chauffage au sol), montée < 0,5 °C, vitesse
+hors [0,2 ; 6] °C/h, sonde à trop grands pas (frémissement et arrivée sur la même lecture). Un
+capteur biaisé de 0,5 °C décale l'avance d'environ 0,5 / vitesse, pas plus. Poids `max(0,3 ; 1/(n+1))`. Pas d'apprentissage quand le capteur de pièce est l'un
+des émetteurs. Défauts : 15 min, 1 °C/h. Le réglage « Ce qu'elle a appris » l'affiche.
+
+Températures comparées en dixièmes entiers. Persisté : cibles et apprentissage (écriture immédiate) ;
+l'épisode en cours est volatile. Cible dépassée de plus de 2 h au chargement : jetée (Homey revenu à 18 h 30 n'impose pas le Confort
+de 7 h ; revenu à 7 h 20, il l'applique).
+
+Lot 2 (hors périmètre) : modèle dépendant de l'extérieur — les 10 derniers épisodes acceptés gardent
+leur température extérieure moyenne. Le nombre de pièces chauffant en même temps n'est pas encore
+enregistré : le noyau d'un thermostat ne le connaît pas.

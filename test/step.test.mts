@@ -1243,3 +1243,211 @@ test('`dt` de la boucle PI se compte en PÉRIODES DE RÉGULATION, pas en cycles 
   const due = stepVTherm(first.nextState, setpointMode, cfg, 600_000);
   assert.notEqual(due.nextState.persistent.regulation.accumulatedError, seeded);
 });
+
+// --- Préchauffe anticipée (SPEC §14) -----------------------------------------
+
+const HOUR = 3_600_000;
+/** Confort à 22 °C pour coller aux critères chiffrés du plan ; pièce à 19 °C. */
+const PREHEAT_CONFIG = config({
+  presetTemps: { ...DEFAULT_PRESET_TEMPS, comfort: 22 },
+  awayTemps: { ...DEFAULT_AWAY_TEMPS, comfort: 17 },
+  preheatMaxLeadMin: 180,
+});
+const LEARNED = {
+  deadTimeMin: 15, ratePerHour: 1, accepted: 3, rejected: 0, lastRejectReason: null, plateauTemp: null, history: [],
+};
+
+function preheatState(atMs: number, overrides: Partial<VThermState['persistent']> = {}): VThermState {
+  return freshState({
+    preset: 'eco',
+    preheatTargets: [{ preset: 'comfort', atMs }],
+    preheatLearning: LEARNED,
+    ...overrides,
+  });
+}
+
+test('préchauffe, critère 1 : sans cible, l\'apprentissage ne change aucune décision', () => {
+  const scenario = [
+    inputs({ roomTemp: reading(16) }),
+    inputs({ roomTemp: reading(16.5, 60_000), windowContact: reading(true) }),
+    inputs({ roomTemp: reading(17, 120_000), windowContact: reading(true) }),
+    inputs({ roomTemp: reading(17.5, 180_000), centralMode: 'frost' }),
+  ];
+  let plain = freshState();
+  let withLearning = freshState({ preheatLearning: { ...LEARNED, accepted: 7, ratePerHour: 3 } });
+  scenario.forEach((world, index) => {
+    const a = stepVTherm(plain, world, CONFIG, index * 60_000);
+    const b = stepVTherm(withLearning, world, CONFIG, index * 60_000);
+    assert.deepEqual(a.outputs, b.outputs, `pas ${index}`);
+    plain = a.nextState;
+    withLearning = b.nextState;
+  });
+});
+
+test('préchauffe, critère 5 : le pas qui bascule régule, publie et annonce déjà le nouveau preset', () => {
+  const atMs = 10 * HOUR;
+  // 19 → 22 °C, appris : 195 min bornés à 180. À échéance − 180 min, la cible bascule.
+  let state = preheatState(atMs);
+  const before = stepVTherm(state, inputs({ roomTemp: reading(19) }), PREHEAT_CONFIG, atMs - 181 * 60_000);
+  assert.equal(before.outputs.capabilities.vtherm_preset, 'eco');
+  assert.equal(before.outputs.wakeUpAtMs, atMs - 180 * 60_000, 'critère 10 : réveil à l\'instant de démarrage');
+  state = before.nextState;
+
+  const fired = stepVTherm(state, inputs({ roomTemp: reading(19) }), PREHEAT_CONFIG, atMs - 180 * 60_000);
+  assert.equal(fired.outputs.capabilities.vtherm_preset, 'comfort');
+  assert.equal(fired.outputs.capabilities.target_temperature, 22);
+  assert.equal(fired.outputs.setpointToEmitter, 22, 'la régulation du même pas vise déjà 22 °C');
+  const kinds = fired.outputs.events.map((event) => event.kind);
+  assert.deepEqual(kinds.filter((kind) => kind === 'preheat_started'), ['preheat_started']);
+  assert.deepEqual(kinds.filter((kind) => kind === 'preset_changed'), ['preset_changed']);
+  assert.deepEqual(fired.outputs.events.find((event) => event.kind === 'preheat_started'), {
+    kind: 'preheat_started', preset: 'comfort', atMs, leadMin: 180,
+  });
+  assert.deepEqual(fired.nextState.persistent.preheatTargets, []);
+  assert.equal(fired.nextState.persistent.preset, 'comfort', 'la bascule est durable, comme un set_preset');
+
+  const after = stepVTherm(fired.nextState, inputs({ roomTemp: reading(19) }), PREHEAT_CONFIG, atMs - 179 * 60_000);
+  assert.equal(after.outputs.events.filter((event) => event.kind === 'preheat_started').length, 0, 'une seule fois');
+});
+
+test('préchauffe, critère 3 : pièce déjà à 22 °C, la cible bascule à son heure exacte', () => {
+  const atMs = 10 * HOUR;
+  const state = preheatState(atMs);
+  assert.equal(stepVTherm(state, inputs({ roomTemp: reading(22) }), PREHEAT_CONFIG, atMs - 1).outputs
+    .capabilities.vtherm_preset, 'eco');
+  assert.equal(stepVTherm(state, inputs({ roomTemp: reading(22) }), PREHEAT_CONFIG, atMs).outputs
+    .capabilities.vtherm_preset, 'comfort');
+});
+
+test('préchauffe, critère 4 : cible posée après son instant de démarrage, bascule au pas suivant', () => {
+  const atMs = 10 * HOUR;
+  // 30 min avant l'échéance, alors qu'il en faudrait 180 : le pas déclenché par la carte bascule.
+  const result = stepVTherm(preheatState(atMs), inputs({ roomTemp: reading(19) }), PREHEAT_CONFIG, atMs - 30 * 60_000);
+  assert.equal(result.outputs.capabilities.vtherm_preset, 'comfort');
+});
+
+test('préchauffe, critère 6 : un boost temporisé en cours est annulé par la bascule', () => {
+  const atMs = 10 * HOUR;
+  const state = preheatState(atMs, {
+    timedPreset: { preset: 'boost', untilMs: atMs + HOUR, previous: 'eco' },
+  });
+  const result = stepVTherm(state, inputs({ roomTemp: reading(22) }), PREHEAT_CONFIG, atMs);
+  assert.equal(result.nextState.persistent.timedPreset, null);
+  assert.equal(result.outputs.capabilities.vtherm_preset, 'comfort');
+});
+
+test('préchauffe, critère 9 : absent la nuit, l\'avance se calcule sur la température de présence', () => {
+  const atMs = 10 * HOUR;
+  // Sur la température d'absence (17 °C), une pièce à 19 °C n'aurait besoin d'aucune avance.
+  const result = stepVTherm(
+    preheatState(atMs),
+    inputs({ roomTemp: reading(19), presence: reading(false) }),
+    PREHEAT_CONFIG,
+    atMs - 180 * 60_000,
+  );
+  assert.equal(result.outputs.capabilities.vtherm_preset, 'comfort');
+  assert.equal(result.outputs.capabilities.target_temperature, 17, 'la consigne appliquée reste celle de l\'arbitrage');
+});
+
+test('préchauffe : critère 7, deux cibles basculent chacune à son heure', () => {
+  const first = 10 * HOUR;
+  const second = 20 * HOUR;
+  let state = freshState({
+    preset: 'eco',
+    preheatTargets: [{ preset: 'comfort', atMs: first }, { preset: 'boost', atMs: second }],
+    preheatLearning: LEARNED,
+  });
+  const room = inputs({ roomTemp: reading(23.5) });
+  let result = stepVTherm(state, room, PREHEAT_CONFIG, first);
+  assert.equal(result.outputs.capabilities.vtherm_preset, 'comfort');
+  assert.deepEqual(result.nextState.persistent.preheatTargets, [{ preset: 'boost', atMs: second }]);
+  state = result.nextState;
+
+  result = stepVTherm(state, room, PREHEAT_CONFIG, first + HOUR);
+  assert.equal(result.outputs.capabilities.vtherm_preset, 'comfort');
+  assert.equal(result.outputs.wakeUpAtMs, second, 'pièce déjà au-dessus du boost : réveil à l\'échéance');
+
+  result = stepVTherm(result.nextState, room, PREHEAT_CONFIG, second);
+  assert.equal(result.outputs.capabilities.vtherm_preset, 'boost');
+  assert.deepEqual(result.nextState.persistent.preheatTargets, []);
+});
+
+test('préchauffe : thermostat éteint, la cible est consommée à son heure sans toucher au preset', () => {
+  const atMs = 10 * HOUR;
+  const off = stepVTherm(preheatState(atMs), inputs({ roomTemp: reading(19), onoff: false }), PREHEAT_CONFIG, atMs - 60 * 60_000);
+  assert.deepEqual(off.nextState.persistent.preheatTargets.length, 1, 'pas d\'avance quand rien ne chauffe');
+  const offAt = stepVTherm(preheatState(atMs), inputs({ roomTemp: reading(19), onoff: false }), PREHEAT_CONFIG, atMs);
+  assert.equal(offAt.outputs.capabilities.vtherm_preset, 'eco');
+  assert.deepEqual(offAt.nextState.persistent.preheatTargets, []);
+  assert.equal(offAt.outputs.events.some((event) => event.kind === 'preheat_started'), false);
+});
+
+test('préchauffe : une cible qui ne change rien ne déclenche pas « la préchauffe démarre »', () => {
+  const atMs = 10 * HOUR;
+  const result = stepVTherm(preheatState(atMs, { preset: 'comfort' }), inputs({ roomTemp: reading(22) }), PREHEAT_CONFIG, atMs);
+  assert.deepEqual(result.nextState.persistent.preheatTargets, []);
+  assert.equal(result.outputs.events.some((event) => event.kind === 'preheat_started'), false);
+});
+
+test('préchauffe : une cible Éco ne quitte pas le Confort en avance, même pièce sous l\'Éco', () => {
+  const atMs = 10 * HOUR;
+  const state = freshState({ preset: 'comfort', preheatTargets: [{ preset: 'eco', atMs }], preheatLearning: LEARNED });
+  const before = stepVTherm(state, inputs({ roomTemp: reading(16.5) }), PREHEAT_CONFIG, atMs - 60_000);
+  assert.equal(before.outputs.capabilities.vtherm_preset, 'comfort');
+});
+
+test('préchauffe : retour d\'un arrêt après l\'échéance, l\'avance annoncée est nulle', () => {
+  const atMs = 10 * HOUR;
+  const result = stepVTherm(preheatState(atMs), inputs({ roomTemp: reading(19) }), PREHEAT_CONFIG, atMs + 2 * HOUR);
+  const started = result.outputs.events.find((event) => event.kind === 'preheat_started');
+  assert.deepEqual(started, { kind: 'preheat_started', preset: 'comfort', atMs, leadMin: 0 });
+});
+
+test('préchauffe : une remontée réelle alimente l\'apprentissage à travers le noyau', () => {
+  const cfg = PREHEAT_CONFIG;
+  // Un pas en Éco d'abord : l'épisode s'ouvre sur le CHANGEMENT de consigne vers le Confort.
+  let state = stepVTherm(freshState({ preset: 'eco' }), inputs({ roomTemp: reading(19, -60_000) }), cfg, -60_000).nextState;
+  state = { ...state, persistent: { ...state.persistent, preset: 'comfort' } };
+  const series: [number, number][] = [[0, 19.0], [12, 19.1], [60, 20.5], [120, 21.8]];
+  for (const [minutes, temp] of series) {
+    const atMs = minutes * 60_000;
+    state = stepVTherm(state, inputs({ roomTemp: reading(temp, atMs) }), cfg, atMs).nextState;
+  }
+  assert.equal(state.persistent.preheatLearning.accepted, 1);
+  near(state.persistent.preheatLearning.ratePerHour, 1.5);
+  assert.equal(state.volatile.episode, null);
+});
+
+test('préchauffe : capteur de pièce = émetteur, le noyau n\'ouvre aucun épisode', () => {
+  const result = stepVTherm(
+    freshState({ preset: 'comfort' }),
+    inputs({ roomTemp: reading(19), roomSensorIsEmitter: true }),
+    PREHEAT_CONFIG,
+    0,
+  );
+  assert.equal(result.nextState.volatile.episode, null);
+});
+
+test('préchauffe : une cible Éco à 6 h ne rebascule pas un Confort de 6 h 30 déjà anticipé', () => {
+  const six = 6 * HOUR;
+  let state = freshState({
+    preset: 'eco',
+    preheatTargets: [{ preset: 'eco', atMs: six }, { preset: 'comfort', atMs: six + 30 * 60_000 }],
+    preheatLearning: LEARNED,
+  });
+  for (let nowMs = six - 3 * HOUR; nowMs <= six + 40 * 60_000; nowMs += 5 * 60_000) {
+    state = stepVTherm(state, inputs({ roomTemp: reading(19, nowMs) }), PREHEAT_CONFIG, nowMs).nextState;
+  }
+  assert.equal(state.persistent.preset, 'comfort');
+  assert.deepEqual(state.persistent.preheatTargets, []);
+});
+
+test('préchauffe : la nuit en absence, une cible Éco ne passe pas pour une hausse face au Confort-absence', () => {
+  const atMs = 22 * HOUR;
+  // Confort 22 / Confort-absence 17, Éco 18 : comparer 18 à 17 aurait anticipé une BAISSE de 45 min.
+  const cfg = { ...PREHEAT_CONFIG, presetTemps: { ...PREHEAT_CONFIG.presetTemps, eco: 18 } };
+  const state = freshState({ preset: 'comfort', preheatTargets: [{ preset: 'eco', atMs }], preheatLearning: LEARNED });
+  const before = stepVTherm(state, inputs({ roomTemp: reading(17.5), presence: reading(false) }), cfg, atMs - 30 * 60_000);
+  assert.equal(before.outputs.capabilities.vtherm_preset, 'comfort');
+  assert.equal(before.nextState.persistent.preheatTargets.length, 1);
+});

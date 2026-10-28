@@ -14,7 +14,7 @@
 /** Les groupes du thermostat qui portent une explication, dans l'ordre de la page. */
 export const VTHERM_EXPLAIN_IDS = [
   'presets_hint', 'away_hint', 'tpi_hint', 'regulation_hint', 'expert_hint',
-  'window_hint', 'presence_hint', 'central_hint', 'emitter_hint', 'safety_hint',
+  'window_hint', 'presence_hint', 'central_hint', 'emitter_hint', 'preheat_hint', 'safety_hint',
 ] as const;
 
 /** L'appareil chaudière n'a qu'un groupe à expliquer. */

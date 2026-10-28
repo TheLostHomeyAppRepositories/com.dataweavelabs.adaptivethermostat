@@ -12,15 +12,17 @@
  */
 
 import type {
-  CentralMode, Demand, Preset, Reading, SyncMode, VThermConfig, VThermEvent,
-  VThermInputs, VThermOutputs, VThermState, VThermStateDefaults, VThermWarning,
+  CentralMode, Demand, Preset, PreheatLearning, PreheatPreset, PreheatTarget, Reading, SyncMode,
+  VThermConfig, VThermEvent, VThermInputs, VThermOutputs, VThermState, VThermStateDefaults,
+  VThermWarning,
 } from '../lib/types.mjs';
 import type { BoilerParams, BoilerResult, BoilerState } from '../lib/types.mjs';
 import {
-  BOILER_DIVERGENCE_RETRY_SEC, SETPOINT_MAX, SETPOINT_MIN, STALE_MEASUREMENT_SEC,
-  TIMED_PRESET_MAX_MINUTES, TIMED_PRESET_MIN_MINUTES,
+  BOILER_DIVERGENCE_RETRY_SEC, DEFAULT_PREHEAT_MAX_LEAD_MIN, PREHEAT_MAX_TARGETS, SETPOINT_MAX, SETPOINT_MIN,
+  STALE_MEASUREMENT_SEC, TIMED_PRESET_MAX_MINUTES, TIMED_PRESET_MIN_MINUTES,
 } from '../lib/constants.mjs';
 import { createBoilerState, ignitionAllowedAtMs, stepBoiler } from '../lib/boilerAggregator.mjs';
+import { addPreheatTarget, targetsAfterManualChange } from '../lib/preheat.mjs';
 import { restoreVThermState } from '../lib/state.mjs';
 import { stepVTherm } from '../lib/step.mjs';
 import type { CapValue, SourceBinding } from './hub.mjs';
@@ -170,6 +172,11 @@ export interface DeviceHost {
   getStoreValue(key: string): unknown;
   setStoreValue(key: string, value: unknown): Promise<void>;
   triggerFlow(event: ParticipantEvent): Promise<void>;
+  /**
+   * Affiche ce que la préchauffe a appris (SPEC §14). Facultatif : un hôte qui ne l'implémente pas
+   * n'affiche rien, et la régulation n'en dépend pas.
+   */
+  showPreheatStatus?(learning: PreheatLearning, excluded: boolean): Promise<void>;
   log(...args: unknown[]): void;
   error(...args: unknown[]): void;
 }
@@ -197,6 +204,11 @@ export interface VThermParticipantOptions {
   requestTick: (reason: string) => void;
   defaults: VThermStateDefaults;
   nowMs: number;
+  /**
+   * Le capteur de pièce est-il l'un des émetteurs ? Relu à chaque pas : les sources se re-désignent
+   * à chaud. Absent = jamais.
+   */
+  roomSensorIsEmitter?: () => boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +249,16 @@ function readBoolean(
   return { value, atMs: reading.atMs, stale: reading.stale };
 }
 
+/**
+ * Ce qui, dans la préchauffe, mérite une écriture immédiate du `store` : les cibles (choix de
+ * l'utilisateur) et un épisode ACCEPTÉ (des heures de mesure). Un rejet attend l'intervalle
+ * ordinaire — il n'apprend rien, et le compter ici écrivait la flash à chaque rejet.
+ */
+function preheatSignature(state: VThermState): string {
+  const { preheatTargets, preheatLearning } = state.persistent;
+  return JSON.stringify([preheatTargets, preheatLearning.accepted]);
+}
+
 // ---------------------------------------------------------------------------
 // VTherm
 // ---------------------------------------------------------------------------
@@ -250,6 +272,7 @@ export class VThermParticipant implements Tickable {
   private readonly sources: VThermSourceBindings;
   private readonly centralMode: () => CentralMode;
   private readonly requestTick: (reason: string) => void;
+  private readonly roomSensorIsEmitter: () => boolean;
 
   private config: VThermConfig;
   private syncMode: SyncMode;
@@ -265,6 +288,10 @@ export class VThermParticipant implements Tickable {
   private persistedPreset: Preset;
   private persistedManualSetpoint: number;
   private persistedTimedUntil: number | null;
+  /** Cibles et compteurs d'apprentissage tels que persistés : voir `preheatSignature`. */
+  private persistedPreheat: string;
+  /** Apprentissage tel qu'affiché, `null` tant que rien ne l'a été. */
+  private shownPreheat: string | null = null;
 
   /** Consigne CHOISIE au dernier pas, celle qu'exige la remise en état sûr (SPEC §11.1). */
   private userSetpoint: number;
@@ -303,6 +330,7 @@ export class VThermParticipant implements Tickable {
     this.sources = options.sources;
     this.centralMode = options.centralMode;
     this.requestTick = options.requestTick;
+    this.roomSensorIsEmitter = options.roomSensorIsEmitter ?? (() => false);
     this.config = options.config;
     this.syncMode = options.syncMode;
     this.controlsBoilerFlag = options.controlsBoiler;
@@ -318,6 +346,7 @@ export class VThermParticipant implements Tickable {
     this.persistedPreset = persistent.preset;
     this.persistedManualSetpoint = persistent.manualSetpoint;
     this.persistedTimedUntil = persistent.timedPreset?.untilMs ?? null;
+    this.persistedPreheat = preheatSignature(this.state);
     this.userSetpoint = persistent.manualSetpoint;
   }
 
@@ -415,6 +444,7 @@ export class VThermParticipant implements Tickable {
     this.demandValue = this.confirmedDemand(outputs.demand);
     this.forgetUnconfirmedValveWrite();
     await this.persistIfNeeded(nowMs);
+    await this.refreshPreheatStatus();
   }
 
   private collectInputs(roomTemp: Reading<number> | null, nowMs: number): VThermInputs {
@@ -442,6 +472,7 @@ export class VThermParticipant implements Tickable {
       // Capability absente au tout premier pas : un thermostat neuf est allumé.
       onoff: typeof onoff === 'boolean' ? onoff : true,
       windowBypass: this.windowBypass,
+      roomSensorIsEmitter: this.roomSensorIsEmitter(),
     };
   }
 
@@ -637,9 +668,14 @@ export class VThermParticipant implements Tickable {
     const persistent = this.state.persistent;
     const timedUntil = persistent.timedPreset?.untilMs ?? null;
 
+    const preheat = preheatSignature(this.state);
+
+    // Les cibles de préchauffe sont des choix de l'utilisateur au même titre que le preset, et un
+    // épisode accepté représente des heures de mesure : ni l'un ni l'autre n'attend l'intervalle.
     const userChoiceChanged = persistent.preset !== this.persistedPreset
       || persistent.manualSetpoint !== this.persistedManualSetpoint
-      || timedUntil !== this.persistedTimedUntil;
+      || timedUntil !== this.persistedTimedUntil
+      || preheat !== this.persistedPreheat;
 
     if (!userChoiceChanged && nowMs - this.lastPersistAtMs < PERSIST_INTERVAL_MS) return;
 
@@ -649,6 +685,7 @@ export class VThermParticipant implements Tickable {
       this.persistedPreset = persistent.preset;
       this.persistedManualSetpoint = persistent.manualSetpoint;
       this.persistedTimedUntil = timedUntil;
+      this.persistedPreheat = preheat;
     } catch (err) {
       this.host.error('Écriture de l\'état durable :', err);
     }
@@ -659,16 +696,23 @@ export class VThermParticipant implements Tickable {
   // L'état durable appartient au participant : le laisser modifier de l'extérieur produirait deux
   // vérités. Chaque mutation demande un recalcul, que l'ordonnanceur coalesce.
 
-  setPreset(preset: Preset): void {
+  setPreset(preset: Preset, nowMs: number = Date.now()): void {
     // Un choix manuel annule le preset temporisé : les deux en même temps rendraient la consigne
     // inexplicable dans l'interface.
-    this.mutate({ preset, timedPreset: null }, 'preset');
+    this.mutate({
+      preset, timedPreset: null, preheatTargets: this.targetsAfterManualChange(nowMs),
+    }, 'preset');
   }
 
-  setManualSetpoint(setpoint: number): void {
+  setManualSetpoint(setpoint: number, nowMs: number = Date.now()): void {
     if (!Number.isFinite(setpoint)) return;
     const value = Math.min(SETPOINT_MAX, Math.max(SETPOINT_MIN, setpoint));
-    this.mutate({ preset: 'none', manualSetpoint: value, timedPreset: null }, 'setpoint');
+    this.mutate({
+      preset: 'none',
+      manualSetpoint: value,
+      timedPreset: null,
+      preheatTargets: this.targetsAfterManualChange(nowMs),
+    }, 'setpoint');
   }
 
   setTimedPreset(preset: Preset, minutes: number, nowMs: number): void {
@@ -683,13 +727,71 @@ export class VThermParticipant implements Tickable {
     const previous = this.state.persistent.timedPreset?.previous ?? this.state.persistent.preset;
     this.mutate({
       timedPreset: { preset, untilMs: nowMs + bounded * MS_PER_MINUTE, previous },
+      preheatTargets: this.targetsAfterManualChange(nowMs),
     }, 'timed-preset');
   }
 
-  cancelTimedPreset(): void {
+  /**
+   * Pose une cible de préchauffe (SPEC §14). Lève quand la liste est pleine : la carte Flow
+   * s'affiche alors en échec dans son historique, ce qui est le seul refus que l'utilisateur voie.
+   */
+  addPreheatTarget(preset: PreheatPreset, atMs: number): void {
+    if (!Number.isFinite(atMs)) return;
+    const next = addPreheatTarget(this.state.persistent.preheatTargets, { preset, atMs });
+    if (next === null) {
+      throw new Error(this.host.translate('device.preheat.full').replace('{max}', String(PREHEAT_MAX_TARGETS)));
+    }
+    this.mutate({ preheatTargets: next }, 'preheat-target');
+  }
+
+  cancelPreheatTargets(): void {
+    if (this.state.persistent.preheatTargets.length === 0) return;
+    this.mutate({ preheatTargets: [] }, 'preheat-cancel');
+  }
+
+  get preheatTargets(): readonly PreheatTarget[] {
+    return this.state.persistent.preheatTargets;
+  }
+
+  /**
+   * Un changement manuel annule les cibles dont il tombe dans la fenêtre de démarrage. Un écho de
+   * consigne venu de la tête n'en est pas un : `reassertSetpoint` le réécrase sans passer par ici.
+   */
+  private targetsAfterManualChange(nowMs: number): readonly PreheatTarget[] {
+    return targetsAfterManualChange(
+      this.state.persistent.preheatTargets,
+      nowMs,
+      this.config.preheatMaxLeadMin ?? DEFAULT_PREHEAT_MAX_LEAD_MIN,
+    );
+  }
+
+  private async refreshPreheatStatus(): Promise<void> {
+    const show = this.host.showPreheatStatus;
+    if (show === undefined) return;
+
+    const learning = this.state.persistent.preheatLearning;
+    const excluded = this.roomSensorIsEmitter();
+    const key = JSON.stringify([learning.accepted, learning.rejected, learning.lastRejectReason,
+      learning.plateauTemp, learning.ratePerHour, learning.deadTimeMin, excluded]);
+    if (key === this.shownPreheat) return;
+    try {
+      await show.call(this.host, learning, excluded);
+      // Mémorisé APRÈS l'écriture : un échec doit être retenté au pas suivant, pas oublié jusqu'au
+      // prochain épisode.
+      this.shownPreheat = key;
+    } catch (err) {
+      this.host.error('état de la préchauffe :', err);
+    }
+  }
+
+  cancelTimedPreset(nowMs: number = Date.now()): void {
     const timed = this.state.persistent.timedPreset;
     if (timed === null) return;
-    this.mutate({ preset: timed.previous, timedPreset: null }, 'cancel-timed-preset');
+    this.mutate({
+      preset: timed.previous,
+      timedPreset: null,
+      preheatTargets: this.targetsAfterManualChange(nowMs),
+    }, 'cancel-timed-preset');
   }
 
   setWindowBypass(bypass: boolean): void {

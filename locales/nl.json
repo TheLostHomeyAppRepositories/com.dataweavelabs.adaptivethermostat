@@ -134,7 +134,23 @@
       "regulation_hint": "Een radiatorkraan meet de radiator, niet de kamer. Zelfregulering verschuift het setpoint. Vereist een buitentemperatuursensor.",
       "safety_hint": "Een lege batterij in januari zou de kamer anders onverwarmd laten. De app houdt een minimum aan tot de sensor terugkomt, en geeft op na de onderstaande termijn.",
       "tpi_hint": "Dit onderscheidt een echte thermostaat van een bimetaal. De app berekent hoeveel warmte de kamer nodig heeft. De standaardwaarden passen bij een normaal geïsoleerde kamer.",
-      "window_hint": "Twee manieren, die elkaar uitsluiten. Een contactsensor is direct en betrouwbaar. Detectie via temperatuurdaling vereist geen sensor maar reageert trager."
+      "window_hint": "Twee manieren, die elkaar uitsluiten. Een contactsensor is direct en betrouwbaar. Detectie via temperatuurdaling vereist geen sensor maar reageert trager.",
+      "preheat_hint": "Gebruik de Flow-kaart « Preset bereiken op een tijdstip » in plaats van « Preset instellen » om op tijd warm te zijn: de thermostaat begint vooraf met verwarmen, zo lang als deze kamer nodig heeft. Hij leert dat zelf uit elke waargenomen opwarming — de dagelijkse overgang van Eco naar Comfort volstaat. Tot er drie opwarmingen gemeten zijn, gaat hij uit van een trage kamer en begint hij nooit meer dan 90 minuten vooraf."
+    },
+    "preheat": {
+      "status_none": "Nog niets gemeten: voorverwarmen gaat uit van {rate} °C per uur en {dead} minuten opstarttijd.",
+      "status_rejected": "Nog geen bruikbare opwarming ({rejected} genegeerd, laatste reden: {reason}). Voorverwarmen gebruikt de voorzichtige standaardwaarden.",
+      "status_learned": "Stijgt {rate} °C/u na {dead} min opstarttijd — {accepted} opwarmingen gemeten, {rejected} genegeerd.",
+      "status_capped": "Voorsprong nog beperkt tot {cap} min tot er {n} opwarmingen gemeten zijn.",
+      "status_plateau": "De laatste opwarming bleef steken op {temp} °C, onder de instelwaarde: de kamer haalt die mogelijk niet.",
+      "status_excluded": "Leert niet: de kamersensor is een van de koppen, die bij de radiator meet en niet in de kamer. Koppel een aparte kamersensor om het in te schakelen.",
+      "reason_interrupted": "het verwarmen werd uitgeschakeld of verlaagd tijdens de opwarming",
+      "reason_sensor": "de kamersensor zweeg",
+      "reason_demand": "de kamer vroeg niet echt om warmte",
+      "reason_too_long": "de opwarming duurde meer dan {hours} uur",
+      "reason_too_small": "de opwarming was te klein",
+      "reason_rate": "de snelheid was onwaarschijnlijk",
+      "reason_coarse": "de sensor meldt te grof om de opwarming te timen"
     }
   },
   "device": {
@@ -148,12 +164,16 @@
       "valve_stuck": "De Zigbee2MQTT-verbinding is weggevallen en de klep bleef op zijn laatste opening staan: de kamer verwarmt mogelijk niet, ongeacht het instelpunt. De regeling gaat verder via het instelpunt.",
       "emitter_mismatch": "Een van de verwarmingen in deze kamer wordt niet meer aangestuurd: hij kwam terug met een ander soort besturing en blijft staan waar hij het laatst stond. De kamer verwarmt op een fractie van zijn vermogen totdat hij terugkeert of u de thermostaat repareert.",
       "emitter_silent": "De verwarming van deze kamer heeft al meer dan twee dagen geen enkele meting doorgegeven, hoewel ze bereikbaar lijkt: de ingestelde temperaturen van de app komen er waarschijnlijk niet meer aan. De ketel wordt voor deze kamer niet meer aangestuurd. Koppel haar opnieuw en repareer daarna deze thermostaat om haar weer te verbinden."
+    },
+    "preheat": {
+      "full": "Deze thermostaat heeft al {max} geplande voorverwarmingen. Annuleer ze of wacht tot er één voorbij is."
     }
   },
   "flow": {
     "error": {
       "unknown_presence": "Onbekende aanwezigheidswaarde.",
-      "unknown_preset": "Onbekend preset."
+      "unknown_preset": "Onbekend preset.",
+      "invalid_time": "Ongeldige tijd. Gebruik UU:MM."
     }
   }
 }

@@ -214,3 +214,66 @@ export const DEFAULT_SAFETY = {
   /** 24 h. Au-delà, ce n'est plus une pile à changer, c'est un capteur à remplacer. */
   maxDurationMs: 24 * 60 * 60 * 1000,
 } as const;
+
+// ---------------------------------------------------------------------------
+// Préchauffe anticipée (SPEC §14)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ce que l'app suppose d'une pièce dont elle n'a encore vu aucune remontée.
+ *
+ * Volontairement lent : arriver un peu tôt coûte un peu d'énergie, arriver en retard rate le seul
+ * objectif de la fonction. 1 °C/h est ce que fait un radiateur à eau modeste dans une pièce
+ * moyenne ; 15 minutes, le temps que la chaudière démarre et que l'eau chaude arrive.
+ */
+export const PREHEAT_DEFAULT_DEAD_TIME_MIN = 15;
+export const PREHEAT_DEFAULT_RATE_PER_HOUR = 1;
+
+/** Avance maximale par défaut, en minutes (réglage `preheat_max_lead_min`). */
+export const DEFAULT_PREHEAT_MAX_LEAD_MIN = 180;
+
+/**
+ * Plafond tant que l'apprentissage n'a pas abouti, et le nombre d'épisodes qui le lève.
+ *
+ * Sans lui, la valeur prudente du défaut fait démarrer la chaudière trois heures avant chaque
+ * cible — et si l'apprentissage n'aboutit jamais (tête qui plafonne, capteur au radiateur), ces
+ * trois heures durent tout l'hiver. Mieux vaut quelques matins un peu frais qu'une facture.
+ */
+export const PREHEAT_UNLEARNED_MAX_LEAD_MIN = 90;
+export const PREHEAT_LEARNED_AFTER_EPISODES = 3;
+
+/** Cibles pendantes par thermostat. Au-delà, la carte échoue : rien n'est abandonné en silence. */
+export const PREHEAT_MAX_TARGETS = 4;
+
+/**
+ * Une cible dépassée de plus de 2 h au chargement est jetée : l'app revenue à 18 h 30 n'a plus à
+ * imposer le Confort de 7 h. En deçà, le premier pas la bascule normalement — un Homey redémarré à
+ * 7 h 20 doit encore mettre la pièce en Confort.
+ */
+export const PREHEAT_STALE_TARGET_MS = 2 * 60 * 60 * 1000;
+
+/** Bornes de l'apprentissage par épisodes (voir lib/preheat.mts). */
+export const PREHEAT_EPISODE = {
+  /** Écart minimal consigne − pièce pour ouvrir un épisode, °C. */
+  minGap: 1,
+  /** La pièce est « arrivée » à la consigne moins cette marge, °C. */
+  endMargin: 0.2,
+  /** Plus petite hausse qui compte, °C : la résolution des sondes courantes. */
+  riseStep: 0.1,
+  /** Montée minimale pour qu'un épisode dise quelque chose, °C. */
+  minRise: 0.5,
+  /** Aucune nouvelle hausse pendant ce temps : la pièce plafonne. */
+  plateauMs: 45 * 60 * 1000,
+  /**
+   * Au-delà, l'épisode n'est plus une remontée mais une pièce qui n'y arrive pas. Large : à la
+   * vitesse plancher de 0,5 °C/h, un écart de 5 °C prend déjà dix heures, et une pièce lente est
+   * justement celle qui a le plus besoin d'apprendre. 6 h la condamnait aux valeurs par défaut.
+   */
+  maxDurationMs: 12 * 60 * 60 * 1000,
+  minRatePerHour: 0.2,
+  maxRatePerHour: 6,
+  /** Poids plancher d'un épisode dans la moyenne, une fois les premiers passés. */
+  minWeight: 0.3,
+  /** Épisodes acceptés conservés pour le modèle extérieur à venir. */
+  historySize: 10,
+} as const;

@@ -16,7 +16,9 @@ import type {
   VThermConfig, VThermEvent, VThermInputs, VThermLastWrite, VThermOutputs, VThermState,
   VThermWarning, WindowMemento, WindowPhase,
 } from './types.mjs';
-import { SETPOINT_MAX, SETPOINT_MIN, SETPOINT_STEP } from './constants.mjs';
+import {
+  DEFAULT_PREHEAT_MAX_LEAD_MIN, SETPOINT_MAX, SETPOINT_MIN, SETPOINT_STEP,
+} from './constants.mjs';
 import { stepDutyCycle } from './dutyCycle.mjs';
 import { computeOnPercent } from './tpi.mjs';
 import { computeOpeningDegree } from './openingDegree.mjs';
@@ -26,6 +28,7 @@ import { stepWindow } from './windowDetector.mjs';
 import { evaluateSafety } from './safety.mjs';
 import { createMotionState, resolveSetpoint, updateMotion } from './presetResolver.mjs';
 import { resolveStateLabel } from './stateLabel.mjs';
+import { stepEpisode, stepPreheatTargets } from './preheat.mjs';
 import { shouldWrite, type LastWrite, type WriteOptions } from './writePolicy.mjs';
 
 export type {
@@ -167,33 +170,11 @@ export function stepVTherm(
     ? updateMotion(volatile.motion, motionRaw, config.motion, nowMs)
     : createMotionState();
 
-  // === 4. Résolution du preset =============================================
+  // === 3bis. Fenêtre, mode central, préchauffe =============================
   //
-  // Calculée AVANT les priorités qui peuvent l'écraser, pour trois raisons : le preset affiché ne
-  // change pas sous l'effet d'une fenêtre ou d'une absence (SPEC §6.3 et §7), l'expiration d'un
-  // preset temporisé doit être constatée même quand le mode central prend la main, et le mémento
-  // fenêtre a besoin de la consigne telle qu'elle était avant l'action.
-
-  const presetResult = resolveSetpoint({
-    preset: persistent.preset,
-    manualSetpoint: persistent.manualSetpoint,
-    presetTemps: config.presetTemps,
-    awayTemps: config.awayTemps,
-    presence,
-    motion: config.motion,
-    motionState,
-    timedPreset: persistent.timedPreset,
-  }, nowMs);
-
-  let preset: Preset = persistent.preset;
-  let timedPreset = persistent.timedPreset;
-  if (presetResult.timedExpired && timedPreset !== null) {
-    preset = timedPreset.previous;
-    timedPreset = null;
-  }
-  const displayedPreset: Preset = timedPreset !== null ? timedPreset.preset : preset;
-
-  // === 5. Détection d'ouverture ============================================
+  // La fenêtre et le mode central viennent AVANT la résolution du preset : la préchauffe en a
+  // besoin pour décider s'il faut anticiper, et ni l'un ni l'autre ne dépend du preset. Le mémento
+  // fenêtre, qui lit le preset résolu, reste plus bas (§12).
 
   const windowResult = stepWindow(
     persistent.window,
@@ -205,10 +186,77 @@ export function stepVTherm(
   // déclencheurs Flow « fenêtre ouverte/fermée » suivent donc la détection, pas l'action.
   const windowDetected = isDetectedOpen(windowResult.nextState.phase);
 
-  // === 6. Mode central =====================================================
-
   const centralMode: CentralMode = config.useCentralMode ? inputs.centralMode : 'auto';
   const centralOverride = centralMode !== 'auto';
+
+  /*
+   * Préchauffe (SPEC §14). La bascule se fait ICI, avant `resolveSetpoint` : placée après, le pas
+   * qui bascule aurait régulé, publié et annoncé l'ANCIEN preset, et la vraie préchauffe n'aurait
+   * commencé qu'un cycle plus tard.
+   *
+   * Pas d'anticipation quand rien ne chaufferait de toute façon — éteint, fenêtre, mode central
+   * coupé ou hors-gel, capteur muet : la cible bascule alors à son heure exacte, et l'arbitrage
+   * ci-dessous décide comme pour n'importe quel changement de preset.
+   */
+  const preheatMaxLeadMin = config.preheatMaxLeadMin ?? DEFAULT_PREHEAT_MAX_LEAD_MIN;
+  // La consigne CHOISIE avant toute bascule : seule une cible qui la relève s'anticipe. Résolue en
+  // présence, comme la température de la cible : comparer un Confort-absence de 18 °C à un Éco de
+  // 19 °C ferait passer la nuit une baisse pour une hausse, et quitterait le Confort en avance.
+  const chosenBeforePreheat = resolveSetpoint({
+    preset: persistent.preset,
+    manualSetpoint: persistent.manualSetpoint,
+    presetTemps: config.presetTemps,
+    awayTemps: config.awayTemps,
+    presence: null,
+    motion: config.motion,
+    motionState,
+    timedPreset: persistent.timedPreset,
+  }, nowMs).setpoint;
+  const mayAnticipate = inputs.onoff && !windowResult.active
+    && centralMode !== 'stopped' && centralMode !== 'frost';
+  const preheat = stepPreheatTargets({
+    targets: persistent.preheatTargets,
+    learning: persistent.preheatLearning,
+    roomTemp: mayAnticipate ? roomTemp : null,
+    currentSetpoint: chosenBeforePreheat,
+    presetTemps: config.presetTemps,
+    maxLeadMin: preheatMaxLeadMin,
+  }, nowMs);
+
+  // Une bascule vaut un `set_preset` : preset durable, preset temporisé annulé — même un boost
+  // temporisé en cours. Deux états qui se contredisent rendraient la consigne inexplicable.
+  //
+  // Thermostat éteint : la cible est consommée sans toucher au preset. Un thermostat coupé pour
+  // l'été dont le Flow quotidien tourne encore n'a pas à voir son preset réécrit chaque matin.
+  const applied = preheat.fired !== null && inputs.onoff ? preheat.fired : null;
+  const basePreset: Preset = applied === null ? persistent.preset : applied.preset;
+  const baseTimedPreset = applied === null ? persistent.timedPreset : null;
+
+  // === 4. Résolution du preset =============================================
+  //
+  // Calculée AVANT les priorités qui peuvent l'écraser, pour trois raisons : le preset affiché ne
+  // change pas sous l'effet d'une fenêtre ou d'une absence (SPEC §6.3 et §7), l'expiration d'un
+  // preset temporisé doit être constatée même quand le mode central prend la main, et le mémento
+  // fenêtre a besoin de la consigne telle qu'elle était avant l'action.
+
+  const presetResult = resolveSetpoint({
+    preset: basePreset,
+    manualSetpoint: persistent.manualSetpoint,
+    presetTemps: config.presetTemps,
+    awayTemps: config.awayTemps,
+    presence,
+    motion: config.motion,
+    motionState,
+    timedPreset: baseTimedPreset,
+  }, nowMs);
+
+  let preset: Preset = basePreset;
+  let timedPreset = baseTimedPreset;
+  if (presetResult.timedExpired && timedPreset !== null) {
+    preset = timedPreset.previous;
+    timedPreset = null;
+  }
+  const displayedPreset: Preset = timedPreset !== null ? timedPreset.preset : preset;
 
   // === 7. Arbitrage : consigne effective et autorisation de chauffe ========
   //
@@ -524,6 +572,23 @@ export function stepVTherm(
       : { kind: 'inactive' };
   }
 
+  // === 9bis. Apprentissage de la préchauffe ================================
+  //
+  // Après la demande : un épisode a besoin de savoir si la pièce a réellement demandé de la
+  // chaleur. Il n'apprend que d'une régulation nominale — toute décision qui coupe ou abaisse la
+  // chauffe interrompt la montée qu'il observe.
+
+  const episodeResult = stepEpisode(volatile.episode, persistent.preheatLearning, {
+    roomTemp,
+    roomAtMs: roomReading === null ? null : roomReading.atMs,
+    outdoorTemp,
+    setpoint: effectiveSetpoint,
+    previousSetpoint: volatile.lastSetpoint,
+    regulating: inputs.onoff && !heatSuppressed && !setpointLowered,
+    demand,
+    excluded: inputs.roomSensorIsEmitter === true,
+  }, nowMs);
+
   // === 10. Écritures et déduplication ======================================
   //
   // La déduplication est une fonction de correction : le quota de l'API Athom se déclenche aussi en
@@ -635,6 +700,18 @@ export function stepVTherm(
   if (published.sensorQuiet !== null && published.sensorQuiet !== sensorQuiet) {
     events.push(sensorQuiet ? { kind: 'sensor_quiet' } : { kind: 'sensor_recovered' });
   }
+  // Seulement si la bascule change quelque chose : « la préchauffe démarre » sur une pièce déjà en
+  // Confort tromperait un Flow de notification.
+  if (applied !== null && (applied.preset !== persistent.preset || persistent.timedPreset !== null)) {
+    events.push({
+      kind: 'preheat_started',
+      preset: applied.preset,
+      atMs: applied.atMs,
+      // L'avance RÉELLE, pas celle qu'on a calculée : une cible qui bascule au retour d'un arrêt
+      // de l'app ne doit pas annoncer « 45 min d'avance » deux heures après son échéance.
+      leadMin: Math.max(0, Math.round((applied.atMs - nowMs) / 60_000)),
+    });
+  }
   if (published.demandActive !== null && published.demandActive !== demandActive) {
     // `unknown` compte comme une demande arrêtée : c'est déjà ce que l'agrégateur en fait, et deux
     // lectures divergentes du même état finiraient par allumer une chaudière sur de l'inconnu.
@@ -673,6 +750,11 @@ export function stepVTherm(
   }
   if (timedPreset !== null) {
     wakeUps.push(timedPreset.untilMs);
+  }
+  // Instant de démarrage calculé de la prochaine cible. L'avance grandit la nuit à mesure que la
+  // pièce refroidit : ce réveil sert la précision, le cycle de `cycleMin` borne le retard.
+  if (preheat.wakeUpAtMs !== null) {
+    wakeUps.push(preheat.wakeUpAtMs);
   }
   // Prochaine bascule du relais. C'est ce qui fait que la coupure se produit à l'heure dite et non
   // au battement suivant : sans elle, un cycle de 5 min à 10 % de puissance resterait allumé
@@ -776,6 +858,8 @@ export function stepVTherm(
       // Comme `lastOnPercent`, elle ne bouge pas tant que le capteur se tait — sans quoi la borne
       // de durée maximale ne serait jamais atteinte.
       lastGoodReadingAtMs: roomTemp === null ? persistent.lastGoodReadingAtMs : nowMs,
+      preheatTargets: preheat.remaining,
+      preheatLearning: episodeResult.learning,
     },
     volatile: {
       slope: slopeState,
@@ -788,6 +872,8 @@ export function stepVTherm(
         demandActive,
         sensorQuiet,
       },
+      episode: episodeResult.episode,
+      lastSetpoint: effectiveSetpoint,
     },
   };
 

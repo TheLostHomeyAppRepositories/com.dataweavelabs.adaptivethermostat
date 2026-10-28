@@ -309,6 +309,79 @@ export interface PresetResult {
 }
 
 // ---------------------------------------------------------------------------
+// Préchauffe anticipée (SPEC §14)
+// ---------------------------------------------------------------------------
+
+/**
+ * Les presets qu'une cible peut viser. `activity` dépend du mouvement et `none` de la consigne
+ * manuelle : aucun des deux n'a de température connue à l'avance, donc rien à anticiper.
+ */
+export type PreheatPreset = 'frost' | 'eco' | 'comfort' | 'boost';
+
+/** « Ce preset, à cet instant ». `atMs` est absolu, figé au lancement de la carte. */
+export interface PreheatTarget {
+  preset: PreheatPreset;
+  atMs: number;
+}
+
+/** Pourquoi un épisode a été écarté. Une clé, jamais une phrase : `lib/` ne connaît aucune langue. */
+export type EpisodeRejectReason =
+  /** Arrêt, mode central, fenêtre : quelqu'un a coupé ou abaissé la chauffe en route. */
+  | 'interrupted'
+  /** Le capteur de pièce s'est tu. */
+  | 'sensor'
+  /** La pièce n'a pas réellement demandé de chaleur : une montée sans chauffe ne dit rien. */
+  | 'demand'
+  | 'too_long'
+  | 'too_small'
+  /** Vitesse hors de toute plausibilité physique. */
+  | 'rate'
+  /** Frémissement et arrivée sur la même lecture : sonde trop grossière pour chronométrer. */
+  | 'coarse';
+
+/** Un épisode accepté, gardé pour le modèle extérieur du lot suivant. */
+export interface PreheatEpisodeRecord {
+  atMs: number;
+  ratePerHour: number;
+  deadTimeMin: number;
+  /** Température extérieure moyenne pendant la montée, `null` sans capteur. */
+  outdoorMean: number | null;
+}
+
+/** Ce que l'app a appris de la pièce. Durable : c'est des jours de mesures. */
+export interface PreheatLearning {
+  deadTimeMin: number;
+  ratePerHour: number;
+  accepted: number;
+  rejected: number;
+  lastRejectReason: EpisodeRejectReason | null;
+  /**
+   * Température où la dernière montée acceptée a plafonné, `null` si elle a atteint sa consigne.
+   * Une tête en mode consigne se ferme souvent avant : la préchauffe ne pourra pas faire mieux,
+   * et le dire évite de croire à une panne.
+   */
+  plateauTemp: number | null;
+  history: readonly PreheatEpisodeRecord[];
+}
+
+/** Une remontée en cours d'observation. Volatile : perdue au redémarrage, sans gravité. */
+export interface PreheatEpisode {
+  startMs: number;
+  startTemp: number;
+  setpoint: number;
+  /** Premier frémissement : instant et température de la première hausse visible. */
+  riseAtMs: number | null;
+  riseTemp: number | null;
+  /** Maximum atteint et instant de sa PREMIÈRE atteinte. */
+  maxTemp: number;
+  maxAtMs: number;
+  /** Une demande `active` a été vue depuis le début. */
+  demandSeen: boolean;
+  outdoorSum: number;
+  outdoorCount: number;
+}
+
+// ---------------------------------------------------------------------------
 // Chaudière centrale (SPEC §9.2)
 // ---------------------------------------------------------------------------
 
@@ -457,6 +530,9 @@ export interface VThermPersistentState {
   dutyCycle: DutyCycleState;
   /** Instant du dernier pas exécuté. Sert à la règle SPEC §11 « arrêt > 1 h ⇒ RAZ de l'intégrale ». */
   lastRunAtMs: number;
+  /** Cibles de préchauffe pendantes, triées par échéance (SPEC §14). */
+  preheatTargets: readonly PreheatTarget[];
+  preheatLearning: PreheatLearning;
 }
 
 /**
@@ -498,6 +574,10 @@ export interface VThermVolatileState {
   motion: MotionState;
   lastWrite: VThermLastWrite;
   lastPublished: PublishedSnapshot;
+  /** Remontée en cours d'observation pour l'apprentissage de la préchauffe. */
+  episode: PreheatEpisode | null;
+  /** Consigne effective du pas précédent : un épisode ne s'ouvre que sur son changement. */
+  lastSetpoint: number | null;
 }
 
 export interface VThermState {
@@ -580,6 +660,11 @@ export interface VThermConfig {
   minDeactivationSec: number;
   /** SPEC §9.1 : un device peut refuser d'obéir au mode central. */
   useCentralMode: boolean;
+  /**
+   * Avance maximale de la préchauffe, en minutes (SPEC §14). C'est aussi la largeur de la fenêtre
+   * où un changement manuel annule une cible. Absent = défaut.
+   */
+  preheatMaxLeadMin?: number;
 }
 
 /** Instantané du monde à l'instant T. Aucune de ces valeurs n'est lue par le noyau lui-même. */
@@ -638,6 +723,12 @@ export interface VThermInputs {
   onoff: boolean;
   /** Action Flow « ignorer la fenêtre » (SPEC §6.3). */
   windowBypass: boolean;
+  /**
+   * Le capteur de pièce est l'un des émetteurs : une tête utilisée comme thermomètre mesure au
+   * radiateur, et la vitesse de montée qu'on y lirait n'est pas celle de la pièce. L'apprentissage
+   * de la préchauffe est alors suspendu. Absent = faux.
+   */
+  roomSensorIsEmitter?: boolean;
 }
 
 /**
@@ -668,7 +759,12 @@ export type VThermEvent =
    * pièce cesse simplement d'être chauffée, en silence, jusqu'à ce que quelqu'un ait froid.
    */
   | { kind: 'sensor_quiet' }
-  | { kind: 'sensor_recovered' };
+  | { kind: 'sensor_recovered' }
+  /**
+   * Une cible de préchauffe vient de basculer son preset, `leadMin` minutes avant `atMs` — zéro
+   * quand elle bascule à l'heure ou en retard (retour d'un arrêt de l'app).
+   */
+  | { kind: 'preheat_started'; preset: PreheatPreset; atMs: number; leadMin: number };
 
 /**
  * Avertissement à afficher sur l'appareil, sous forme de CLÉ de traduction.

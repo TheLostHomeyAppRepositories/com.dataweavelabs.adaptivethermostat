@@ -1266,6 +1266,67 @@
   {
     "type": "group",
     "label": {
+      "en": "Preheating",
+      "fr": "Préchauffe",
+      "nl": "Voorverwarmen"
+    },
+    "children": [
+      {
+        "id": "preheat_hint",
+        "type": "label",
+        "value": "",
+        "label": {
+          "en": "How preheating works",
+          "fr": "Comment fonctionne la préchauffe",
+          "nl": "Hoe voorverwarmen werkt"
+        },
+        "hint": {
+          "en": "With the Flow card « Reach a preset at a time », this thermostat starts heating early enough to be at temperature on time.",
+          "fr": "Avec la carte Flow « Atteindre un preset à une heure », ce thermostat démarre la chauffe assez tôt pour être à température à l'heure.",
+          "nl": "Met de Flow-kaart « Preset bereiken op een tijdstip » begint deze thermostaat vroeg genoeg met verwarmen om op tijd op temperatuur te zijn."
+        }
+      },
+      {
+        "id": "preheat_max_lead_min",
+        "type": "number",
+        "value": 180,
+        "min": 0,
+        "max": 360,
+        "step": 5,
+        "units": {
+          "en": "min"
+        },
+        "label": {
+          "en": "Maximum lead",
+          "fr": "Avance maximale",
+          "nl": "Maximale voorsprong"
+        },
+        "hint": {
+          "en": "The earliest heating may start before a target. Until three rises have been measured, it is capped at 90 minutes. A manual change within this window before a target cancels it.",
+          "fr": "Le plus tôt que la chauffe puisse démarrer avant une cible. Tant que trois remontées n'ont pas été mesurées, elle est plafonnée à 90 minutes. Un changement manuel dans cette fenêtre avant une cible l'annule.",
+          "nl": "Hoe vroeg het verwarmen vóór een doel mag beginnen. Tot er drie opwarmingen gemeten zijn, is dit beperkt tot 90 minuten. Een handmatige wijziging binnen dit venster vóór een doel annuleert het."
+        }
+      },
+      {
+        "id": "preheat_status",
+        "type": "label",
+        "value": "",
+        "label": {
+          "en": "What it has learned",
+          "fr": "Ce qu'elle a appris",
+          "nl": "Wat het geleerd heeft"
+        },
+        "hint": {
+          "en": "Read-only. Updated after each temperature rise the app observes.",
+          "fr": "En lecture seule. Mis à jour après chaque remontée observée.",
+          "nl": "Alleen-lezen. Bijgewerkt na elke waargenomen opwarming."
+        }
+      }
+    ]
+  },
+  {
+    "type": "group",
+    "label": {
       "en": "Safety",
       "fr": "Sécurité",
       "nl": "Veiligheid"

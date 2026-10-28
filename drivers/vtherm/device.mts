@@ -24,8 +24,13 @@ import {
   DEFAULT_MIN_OPENING_DEGREE, DEFAULT_MOTION_DELAY_SEC, DEFAULT_MOTION_OFF_DELAY_SEC,
   DEFAULT_MIN_ACTIVATION_SEC, DEFAULT_MIN_DEACTIVATION_SEC,
   DEFAULT_OPENING_THRESHOLD, DEFAULT_PRESET_TEMPS, DEFAULT_REGULATION_THRESHOLD, DEFAULT_SLOPE,
-  DEFAULT_TPI, DEFAULT_WINDOW, DEFAULT_AWAY_TEMPS, DEFAULT_SAFETY } from '../../lib/constants.mjs';
-import type { Preset, VThermConfig } from '../../lib/types.mjs';
+  DEFAULT_TPI, DEFAULT_WINDOW, DEFAULT_AWAY_TEMPS, DEFAULT_SAFETY, DEFAULT_PREHEAT_MAX_LEAD_MIN,
+  PREHEAT_DEFAULT_DEAD_TIME_MIN, PREHEAT_DEFAULT_RATE_PER_HOUR, PREHEAT_EPISODE, PREHEAT_LEARNED_AFTER_EPISODES,
+  PREHEAT_UNLEARNED_MAX_LEAD_MIN } from '../../lib/constants.mjs';
+import type {
+  Preset, PreheatLearning, PreheatPreset, VThermConfig,
+} from '../../lib/types.mjs';
+import { formatLocalHhMm, nextOccurrenceMs } from '../../lib/localTime.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { CapValue } from '../../runtime/hub.mjs';
 import { HomeyEmitterAdapter, type EmitterAdapter } from '../../runtime/emitter.mjs';
@@ -155,6 +160,7 @@ export default class VThermDevice extends Homey.Device {
       // qu'un passage en Manuel ne fasse pas chuter la pièce à une valeur arbitraire.
       defaults: { preset: 'comfort', manualSetpoint: config.presetTemps.comfort },
       nowMs: Date.now(),
+      roomSensorIsEmitter: () => this.roomSensorIsEmitter(),
     });
 
     if (this.presenceOverride !== 'auto') this.participant.forcePresence(this.presenceOverride);
@@ -245,6 +251,7 @@ export default class VThermDevice extends Homey.Device {
         await this.setStoreValue(key, value);
       },
       triggerFlow: (event) => this.triggerFlowCard(event),
+      showPreheatStatus: (learning, excluded) => this.showPreheatStatus(learning, excluded),
       log: (...args) => this.log(...args),
       error: (...args) => this.error(...args),
     };
@@ -283,6 +290,13 @@ export default class VThermDevice extends Homey.Device {
         return;
       case 'sensor_quiet':
         await this.trigger('sensor_went_quiet', {});
+        return;
+      case 'preheat_started':
+        await this.trigger('preheat_started', {
+          preset: event.preset,
+          lead_minutes: event.leadMin,
+          target_time: formatLocalHhMm(event.atMs, this.homey.clock.getTimezone()),
+        });
         return;
       default:
         return;
@@ -395,6 +409,74 @@ export default class VThermDevice extends Homey.Device {
 
   applyTargetTemperature(temperature: number): void {
     this.requireParticipant().setManualSetpoint(temperature);
+  }
+
+  /**
+   * « Atteindre ce preset à cette heure » (SPEC §14). L'heure est convertie ICI, une fois pour
+   * toutes, en instant absolu dans le fuseau du Homey : un changement d'heure entre la pose et
+   * l'échéance ne la décale pas.
+   */
+  applyPreheatTarget(preset: PreheatPreset, time: string): void {
+    const participant = this.requireParticipant();
+    const atMs = nextOccurrenceMs(time, Date.now(), this.homey.clock.getTimezone());
+    if (atMs === null) throw new Error(this.homey.__('flow.error.invalid_time'));
+    participant.addPreheatTarget(preset, atMs);
+  }
+
+  cancelPreheat(): void {
+    this.requireParticipant().cancelPreheatTargets();
+  }
+
+  hasPendingPreheat(): boolean {
+    return (this.participant?.preheatTargets.length ?? 0) > 0;
+  }
+
+  /**
+   * Une tête utilisée comme thermomètre mesure au radiateur : la vitesse de montée qu'on y lirait
+   * n'est pas celle de la pièce, et la préchauffe n'apprend pas dessus.
+   */
+  private roomSensorIsEmitter(): boolean {
+    const room = this.sourceId('room');
+    return room !== null && this.emitterIds().includes(room);
+  }
+
+  /**
+   * Ce que la préchauffe a appris, dans les réglages. Sans cette ligne, un apprentissage qui
+   * n'aboutit jamais — capteur collé au radiateur, tête qui plafonne — ferait tourner l'app sur
+   * ses valeurs par défaut tout l'hiver sans que personne ne le sache.
+   */
+  private async showPreheatStatus(learning: PreheatLearning, excluded: boolean): Promise<void> {
+    const t = (key: string): string => this.homey.__(`settings.preheat.${key}`);
+    let text: string;
+    if (excluded) {
+      text = t('status_excluded');
+    } else if (learning.accepted === 0) {
+      text = learning.rejected === 0
+        ? t('status_none')
+          .replace('{rate}', String(PREHEAT_DEFAULT_RATE_PER_HOUR))
+          .replace('{dead}', String(PREHEAT_DEFAULT_DEAD_TIME_MIN))
+        : t('status_rejected')
+          .replace('{rejected}', String(learning.rejected))
+          .replace('{reason}', t(`reason_${learning.lastRejectReason ?? 'too_small'}`)
+            .replace('{hours}', String(PREHEAT_EPISODE.maxDurationMs / 3_600_000)));
+    } else {
+      text = t('status_learned')
+        .replace('{rate}', learning.ratePerHour.toFixed(1))
+        .replace('{dead}', String(Math.round(learning.deadTimeMin)))
+        .replace('{accepted}', String(learning.accepted))
+        .replace('{rejected}', String(learning.rejected));
+      if (learning.accepted < PREHEAT_LEARNED_AFTER_EPISODES) {
+        text += ` ${t('status_capped')
+          .replace('{cap}', String(PREHEAT_UNLEARNED_MAX_LEAD_MIN))
+          .replace('{n}', String(PREHEAT_LEARNED_AFTER_EPISODES))}`;
+      }
+      if (learning.plateauTemp !== null) {
+        text += ` ${t('status_plateau').replace('{temp}', learning.plateauTemp.toFixed(1))}`;
+      }
+    }
+
+    if (this.getSetting('preheat_status') === text) return;
+    await this.setSettings({ preheat_status: text });
   }
 
   applyWindowBypass(bypass: boolean): void {
@@ -949,6 +1031,7 @@ export default class VThermDevice extends Homey.Device {
         maxDurationMs: num(s, 'safety_max_duration_h', DEFAULT_SAFETY.maxDurationMs / 3_600_000) * 3_600_000,
       },
       useCentralMode: bool(s, 'use_central_mode', true),
+      preheatMaxLeadMin: num(s, 'preheat_max_lead_min', DEFAULT_PREHEAT_MAX_LEAD_MIN),
     };
   }
 

@@ -24,7 +24,7 @@ describe('explainSettings', () => {
   it('couvre tous les groupes explicatifs des deux drivers', () => {
     // Le manquement se voit à l'usage — un cadre gris vide dans la page — donc jamais en test
     // manuel. Ici la liste est figée : ajouter un groupe sans son explication casse ce test.
-    assert.equal(VTHERM_EXPLAIN_IDS.length, 10);
+    assert.equal(VTHERM_EXPLAIN_IDS.length, 11);
     assert.equal(CENTRAL_EXPLAIN_IDS.length, 1);
     const all = [...VTHERM_EXPLAIN_IDS, ...CENTRAL_EXPLAIN_IDS];
     assert.equal(new Set(all).size, all.length, 'un identifiant est répété');

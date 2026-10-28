@@ -15,19 +15,29 @@
  */
 
 import type {
-  Preset, RegulationState, TimedPreset, VThermLastWrite, VThermPersistentState,
+  EpisodeRejectReason, Preset, PreheatEpisodeRecord, PreheatLearning, PreheatTarget,
+  RegulationState, TimedPreset, VThermLastWrite, VThermPersistentState,
   VThermState, VThermStateDefaults, VThermVolatileState, WindowMemento, WindowPhase, WindowState,
 } from './types.mjs';
 import type { DutyCycleState } from './dutyCycle.mjs';
-import { REGULATION_RESET_AFTER_SEC, SETPOINT_MAX, SETPOINT_MIN } from './constants.mjs';
+import {
+  PREHEAT_EPISODE, PREHEAT_MAX_TARGETS, PREHEAT_STALE_TARGET_MS, REGULATION_RESET_AFTER_SEC,
+  SETPOINT_MAX, SETPOINT_MIN,
+} from './constants.mjs';
 import { createDutyCycleState } from './dutyCycle.mjs';
 import { createMotionState } from './presetResolver.mjs';
+import { createPreheatLearning, PREHEAT_PRESETS } from './preheat.mjs';
 import { createRegulationState } from './selfRegulation.mjs';
 import { createSlopeState } from './slope.mjs';
 import { createWindowState } from './windowDetector.mjs';
 
 const PRESETS: readonly string[] = ['frost', 'eco', 'comfort', 'boost', 'none', 'activity'];
 const WINDOW_PHASES: readonly string[] = ['closed', 'pending_open', 'open', 'pending_close'];
+// Un `Record` sur l'union, et non une liste : un motif ajouté au type sans être ajouté ici ne compile
+// pas, au lieu d'être relu `null` après chaque redémarrage.
+const REJECT_REASONS: Record<EpisodeRejectReason, true> = {
+  interrupted: true, sensor: true, demand: true, too_long: true, too_small: true, rate: true, coarse: true,
+};
 
 // --- Validateurs élémentaires ----------------------------------------------
 //
@@ -141,6 +151,75 @@ function parseCommandedHeads(value: unknown): boolean[] | null {
   return null;
 }
 
+/**
+ * Cibles de préchauffe relues du `store`.
+ *
+ * Une cible douteuse est écartée seule, pas toute la liste : perdre « Confort à 7 h » parce que
+ * « Boost à 18 h » est illisible serait punir la bonne pour la mauvaise. Une cible dépassée de plus
+ * de `PREHEAT_STALE_TARGET_MS` est jetée ici, et nulle part ailleurs : en deçà, le premier pas la
+ * bascule normalement. Purger plus tard, après ce premier pas, aurait été trop tard — il l'aurait
+ * déjà appliquée.
+ */
+function parsePreheatTargets(value: unknown, nowMs: number): PreheatTarget[] {
+  if (!Array.isArray(value)) return [];
+
+  const targets: PreheatTarget[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const atMs = finiteOrNull(entry.atMs);
+    const preset = entry.preset;
+    if (atMs === null || typeof preset !== 'string') continue;
+    if (!(PREHEAT_PRESETS as readonly string[]).includes(preset)) continue;
+    if (nowMs - atMs > PREHEAT_STALE_TARGET_MS) continue;
+    if (targets.some((existing) => existing.atMs === atMs)) continue;
+    targets.push({ preset: preset as PreheatTarget['preset'], atMs });
+  }
+  return targets.sort((a, b) => a.atMs - b.atMs).slice(0, PREHEAT_MAX_TARGETS);
+}
+
+function parseEpisodeRecord(value: unknown): PreheatEpisodeRecord | null {
+  if (!isRecord(value)) return null;
+  const atMs = finiteOrNull(value.atMs);
+  const ratePerHour = finiteOrNull(value.ratePerHour);
+  const deadTimeMin = finiteOrNull(value.deadTimeMin);
+  if (atMs === null || ratePerHour === null || deadTimeMin === null) return null;
+  return { atMs, ratePerHour, deadTimeMin, outdoorMean: finiteOrNull(value.outdoorMean) };
+}
+
+/**
+ * Apprentissage relu du `store`. Une vitesse hors des bornes physiques retombe sur le défaut : une
+ * vitesse nulle ferait une avance infinie, une vitesse énorme une préchauffe qui ne part jamais.
+ */
+function parsePreheatLearning(value: unknown): PreheatLearning {
+  const defaults = createPreheatLearning();
+  if (!isRecord(value)) return defaults;
+
+  const rate = finiteOrNull(value.ratePerHour);
+  const deadTime = finiteOrNull(value.deadTimeMin);
+  const count = (raw: unknown): number => {
+    const n = finiteOrNull(raw);
+    return n === null || n < 0 ? 0 : Math.floor(n);
+  };
+  const reason = value.lastRejectReason;
+  const history = Array.isArray(value.history)
+    ? value.history.map(parseEpisodeRecord).filter((r): r is PreheatEpisodeRecord => r !== null)
+      .slice(-PREHEAT_EPISODE.historySize)
+    : [];
+
+  return {
+    ratePerHour: rate !== null && rate >= PREHEAT_EPISODE.minRatePerHour && rate <= PREHEAT_EPISODE.maxRatePerHour
+      ? rate : defaults.ratePerHour,
+    deadTimeMin: deadTime !== null && deadTime >= 0 && deadTime <= PREHEAT_EPISODE.maxDurationMs / 60_000
+      ? deadTime : defaults.deadTimeMin,
+    accepted: count(value.accepted),
+    rejected: count(value.rejected),
+    lastRejectReason: typeof reason === 'string' && Object.hasOwn(REJECT_REASONS, reason)
+      ? reason as EpisodeRejectReason : null,
+    plateauTemp: finiteOrNull(value.plateauTemp),
+    history,
+  };
+}
+
 // --- Constructeurs ---------------------------------------------------------
 
 export function createPersistentState(
@@ -161,6 +240,8 @@ export function createPersistentState(
     // `null` et non `nowMs` : aucune mesure n'a encore été vue. Dater l'origine du compte à
     // rebours du mode sécurité sur un démarrage d'app le remettrait à zéro à chaque mise à jour.
     lastGoodReadingAtMs: null,
+    preheatTargets: [],
+    preheatLearning: createPreheatLearning(),
   };
 }
 
@@ -182,6 +263,8 @@ export function createVolatileState(): VThermVolatileState {
       sensorQuiet: null,
       stateLabel: null, preset: null, windowOpen: null, demandActive: null,
     },
+    episode: null,
+    lastSetpoint: null,
   };
 }
 
@@ -231,6 +314,10 @@ export function migratePersistentState(
     lastRunAtMs,
     lastOnPercent: readFraction(raw.lastOnPercent),
     lastGoodReadingAtMs: finiteOrNull(raw.lastGoodReadingAtMs),
+    // Absents d'un état écrit par une version antérieure : aucune cible, rien d'appris. La version
+    // reste 1 — ce sont des ajouts, et leur absence a un sens évident.
+    preheatTargets: parsePreheatTargets(raw.preheatTargets, nowMs),
+    preheatLearning: parsePreheatLearning(raw.preheatLearning),
   };
 }
 

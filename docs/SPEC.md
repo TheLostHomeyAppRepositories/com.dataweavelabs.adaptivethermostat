@@ -753,6 +753,21 @@ Températures comparées en dixièmes entiers. Persisté : cibles et apprentissa
 l'épisode en cours est volatile. Cible dépassée de plus de 2 h au chargement : jetée (Homey revenu à 18 h 30 n'impose pas le Confort
 de 7 h ; revenu à 7 h 20, il l'applique).
 
-Lot 2 (hors périmètre) : modèle dépendant de l'extérieur — les 10 derniers épisodes acceptés gardent
-leur température extérieure moyenne. Le nombre de pièces chauffant en même temps n'est pas encore
-enregistré : le noyau d'un thermostat ne le connaît pas.
+**Modèle extérieur (lot 2).** Les 20 derniers épisodes acceptés gardent leur température
+extérieure moyenne — seulement si elle a été lue sur au moins la moitié des pas de la montée. La
+pente β des moindres carrés de la vitesse en fonction de l'extérieur CORRIGE la vitesse moyenne :
+`vitesse = moyenne + β × (T_ext − T_ext moyenne des épisodes)`. La moyenne (pondérée vers les
+derniers matins) garde la main sur le niveau ; la droite non pondérée, qui retient des épisodes
+anciens, ne donne que la pente. Elle ne s'applique que si elle est digne de confiance : au moins 5
+épisodes avec température extérieure, au moins 4 °C entre le plus froid et le plus doux,
+corrélation ≥ 0,5 et β ≥ 0 (une pièce ne chauffe pas plus vite par grand froid). La température
+dehors est bornée à la plage observée ± 2 °C, la vitesse prédite aux vitesses réellement mesurées.
+Sans capteur extérieur, sans lecture fraîche ou sans modèle : la vitesse moyenne, comme au lot 1.
+Le temps mort reste la moyenne apprise. Le réglage « Ce qu'elle a appris » donne la vitesse aux
+deux bouts de la plage observée.
+
+Limites assumées : le modèle est appris sur la moyenne extérieure d'une montée et appliqué à la
+lecture du moment, plus froide avant l'aube — l'écart fait partir un peu tôt, pas en retard.
+L'historique n'est pas effacé quand on change de capteur ou de tête : il se renouvelle en vingt
+épisodes, la moyenne en quelques-uns. Le nombre de pièces chauffant en même temps n'est pas pris
+en compte : le noyau d'un thermostat ne le connaît pas.

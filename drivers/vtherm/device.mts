@@ -31,6 +31,7 @@ import type {
   Preset, PreheatLearning, PreheatPreset, VThermConfig,
 } from '../../lib/types.mjs';
 import { formatLocalHhMm, nextOccurrenceMs } from '../../lib/localTime.mjs';
+import { fitOutdoorRateModel, predictRate } from '../../lib/preheat.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { CapValue } from '../../runtime/hub.mjs';
 import { HomeyEmitterAdapter, type EmitterAdapter } from '../../runtime/emitter.mjs';
@@ -469,6 +470,18 @@ export default class VThermDevice extends Homey.Device {
         text += ` ${t('status_capped')
           .replace('{cap}', String(PREHEAT_UNLEARNED_MAX_LEAD_MIN))
           .replace('{n}', String(PREHEAT_LEARNED_AFTER_EPISODES))}`;
+      }
+      const model = fitOutdoorRateModel(learning);
+      if (model !== null) {
+        // Les vitesses sont calculées AUX températures affichées, arrondies au degré ; `+ 0` efface
+        // le « -0 » d'un épisode à −0,3 °C.
+        const cold = Math.round(model.minOutdoor) + 0;
+        const warm = Math.round(model.maxOutdoor) + 0;
+        text += ` ${t('status_outdoor')
+          .replace('{cold}', predictRate(model, learning.ratePerHour, cold).toFixed(1))
+          .replace('{tcold}', String(cold))
+          .replace('{warm}', predictRate(model, learning.ratePerHour, warm).toFixed(1))
+          .replace('{twarm}', String(warm))}`;
       }
       if (learning.plateauTemp !== null) {
         text += ` ${t('status_plateau').replace('{temp}', learning.plateauTemp.toFixed(1))}`;

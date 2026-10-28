@@ -140,8 +140,9 @@
     "preheat": {
       "status_none": "Rien de mesuré pour l'instant : la préchauffe suppose {rate} °C par heure et {dead} minutes de mise en route.",
       "status_rejected": "Aucune remontée exploitable pour l'instant ({rejected} écartées, dernier motif : {reason}). La préchauffe utilise ses valeurs prudentes.",
-      "status_learned": "Monte de {rate} °C/h après {dead} min de mise en route — {accepted} remontées mesurées, {rejected} écartées.",
+      "status_learned": "Monte en moyenne de {rate} °C/h après {dead} min de mise en route — {accepted} remontées mesurées, {rejected} écartées.",
       "status_capped": "Avance encore plafonnée à {cap} min jusqu'à {n} remontées mesurées.",
+      "status_outdoor": "Avec un capteur extérieur, l'avance suit la météo : {cold} °C/h à {tcold} °C dehors, {warm} °C/h à {twarm} °C.",
       "status_plateau": "La dernière remontée a plafonné à {temp} °C, sous la consigne : la pièce risque de ne pas l'atteindre.",
       "status_excluded": "Pas d'apprentissage : le capteur de pièce est l'une des têtes, qui mesure au radiateur et non dans la pièce. Liez un capteur de pièce séparé pour l'activer.",
       "reason_interrupted": "la chauffe a été coupée ou abaissée pendant la remontée",

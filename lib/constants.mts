@@ -274,6 +274,30 @@ export const PREHEAT_EPISODE = {
   maxRatePerHour: 6,
   /** Poids plancher d'un épisode dans la moyenne, une fois les premiers passés. */
   minWeight: 0.3,
-  /** Épisodes acceptés conservés pour le modèle extérieur à venir. */
-  historySize: 10,
+  /**
+   * Épisodes acceptés conservés pour le modèle extérieur. Vingt : assez pour qu'une droite tienne
+   * sur trois semaines de matins, assez peu pour suivre la saison.
+   */
+  historySize: 20,
+} as const;
+
+/**
+ * Modèle extérieur (SPEC §14, lot 2) : la pente β de la vitesse en fonction de l'extérieur, ajustée
+ * sur l'historique, CORRIGE la moyenne apprise — `vitesse = moyenne + β × (T_ext − T_ext moyenne)`.
+ *
+ * Il ne s'applique que s'il est identifiable — assez d'épisodes, assez d'écart de température
+ * extérieure, une corrélation nette — et physiquement plausible : une pièce ne chauffe pas plus vite
+ * quand il fait plus froid dehors. Hors de ces conditions, la moyenne du lot 1 s'applique seule.
+ */
+export const PREHEAT_OUTDOOR_MODEL = {
+  /** Épisodes avec température extérieure requis. */
+  minEpisodes: 5,
+  /** Écart minimal, °C, entre l'épisode le plus froid et le plus doux. */
+  minSpread: 4,
+  /** Au-delà de la plage observée, on n'extrapole que de ces °C. */
+  extrapolation: 2,
+  /** Corrélation minimale vitesse/extérieur : en deçà, la pente est du bruit. */
+  minCorrelation: 0.5,
+  /** Part minimale des pas d'un épisode avec une lecture extérieure pour qu'il porte une T_ext. */
+  minOutdoorCoverage: 0.5,
 } as const;

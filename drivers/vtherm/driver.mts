@@ -13,6 +13,7 @@ import { DEFAULT_WINDOW } from '../../lib/constants.mjs';
 import type { Preset } from '../../lib/types.mjs';
 import { PREHEAT_PRESETS } from '../../lib/preheat.mjs';
 import { isWeatherMisused } from '../../lib/weather.mjs';
+import { isPresenceMisused } from '../../lib/presence.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { PresenceOverride } from '../../runtime/participants.mjs';
 import type VThermApp from '../../app.mjs';
@@ -82,7 +83,7 @@ export default class VThermDriver extends Homey.Driver {
     for (const { event, key } of SELECT_EVENTS) {
       session.setHandler(event, async (deviceId: unknown) => {
         const id = asDeviceId(deviceId);
-        if (isWeatherMisused(key, id)) throw new Error(this.homey.__('settings.sources.invalid_device'));
+        if (isWeatherMisused(key, id) || isPresenceMisused(key, id)) throw new Error(this.homey.__('settings.sources.invalid_device'));
         selection.set(key, id);
         return true;
       });
@@ -94,7 +95,7 @@ export default class VThermDriver extends Homey.Driver {
     for (const event of EMITTER_SELECT_EVENTS) {
       session.setHandler(event, async (data: unknown) => {
         const ids = asDeviceIds(data);
-        if (ids.some((id) => isWeatherMisused('emitter', id))) {
+        if (ids.some((id) => isWeatherMisused('emitter', id) || isPresenceMisused('emitter', id))) {
           throw new Error(this.homey.__('settings.sources.invalid_device'));
         }
         // Refusé AU CLIC et pas à la création, pour que les deux chemins s'accordent : la page de
@@ -259,6 +260,12 @@ export default class VThermDriver extends Homey.Driver {
     if (source === 'outdoor') {
       const weather = this.app.hub.weatherSummary();
       candidates.unshift({ id: weather.id, name: weather.name, zoneName: null });
+    }
+    // La présence de Homey, en tête et pour la seule source de présence : c'est la seule qui dise si
+    // le LOGEMENT est occupé, là où un détecteur ne dit que si quelqu'un bouge dans une pièce.
+    if (source === 'presence') {
+      const presence = this.app.hub.presenceSummary();
+      candidates.unshift({ id: presence.id, name: presence.name, zoneName: null });
     }
 
     this.app.trace(

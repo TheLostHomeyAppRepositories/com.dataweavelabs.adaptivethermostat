@@ -108,7 +108,7 @@ supplément, pas une béquille.
 | Capteur de température extérieure | non | alimente le terme `coef_ext` du TPI ; ou **Météo de Homey** (voir sous le tableau) |
 | Capteur d'ouverture (fenêtre/porte) | non | `alarm_contact` — mode capteur de la détection fenêtre |
 | Capteur de mouvement | non | `alarm_motion` — preset Activité |
-| Capteur de présence | non | `alarm_motion`/`onoff` global au logement |
+| Capteur de présence | non | `alarm_presence`/`alarm_occupancy`/`alarm_motion` global au logement ; ou **Présence de Homey** (voir sous le tableau) |
 
 **Météo de Homey.** La liste du capteur extérieur propose en tête « Météo de Homey (internet) » :
 la température de `ManagerWeather.getWeather()` pour l'emplacement du Homey. Elle est stockée sous
@@ -122,6 +122,32 @@ première requête, partie avant l'API), nouvel essai au bout d'1 min, et dès l
 requête abandonnée après 30 s. Sans emplacement ou sans internet : comme sans capteur extérieur, et
 la source apparaît indisponible. La météo n'est acceptée QUE comme source extérieure.
 Code : `lib/weather.mts`, `runtime/weather.mts`.
+
+**Présence de Homey.** La liste du capteur de présence propose en tête « Présence de Homey
+(géolocalisation) » : présent dès qu'un utilisateur actif du Homey a `present === true`
+(`users.getUsers()`), absent quand tous les utilisateurs actifs portent `false`, sans lecture
+quand aucun ne porte de booléen. Identifiant réservé `homey:presence`, lié par le hub comme un
+capteur `alarm_presence` : une requête pour toute l'app, toutes les minutes tant qu'un thermostat
+la désigne, nouvel essai 1 min après un échec, abandon après 30 s. La lecture est datée à la
+requête, pas au dernier changement : une absence de deux semaines doit rester fraîche, et une
+présence périmée vaut « présent ». Les abonnés ne sont prévenus que d'un changement de valeur.
+**Activité de la maison** : quand personne n'est géolocalisé, l'absence attend encore que la maison
+soit calme depuis le délai avant absence — dernière détection de n'importe quel détecteur de
+mouvement ou de présence (capteur réel) de n'importe quel thermostat (`App.houseActivityAtMs`). La
+nounou restée avec les enfants garde ainsi le chauffage. Un changement de ces détecteurs fait tiquer
+les thermostats qui suivent la présence de Homey (`noteActivity`). Sans aucun détecteur dans la
+maison, la géolocalisation décide seule. Limite : un utilisateur sans géolocalisation reste
+`present: false`.
+
+**Délai avant absence** (`presence_off_delay`, 60 min par défaut, 0 à 720). Un capteur de présence
+passé à faux ne déclare le logement vide qu'après ce délai sans nouvelle détection. L'instant de
+référence est l'horodatage du passage à faux (`lastUpdated`), donc le délai ne tient aucun état et
+survit au redémarrage ; le participant annonce un réveil à l'échéance. Ne s'applique pas au forçage
+par Flow ; pour la Présence de Homey (`SourceBinding.confirmedAbsence`), il compte depuis la
+dernière activité de la maison (ci-dessus). Motif : un radar choisi
+comme présence retombait dès que personne ne bougeait, et un Boost de préchauffe s'appliquait à sa
+température d'absence dans un salon occupé.
+Code : `lib/presence.mts`, `runtime/polledFeed.mts` (partagé avec la météo).
 
 ### 2.1bis Groupe d'émetteurs — plusieurs têtes pour une pièce
 

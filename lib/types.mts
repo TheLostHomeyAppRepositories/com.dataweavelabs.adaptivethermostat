@@ -667,6 +667,12 @@ export interface VThermConfig {
    * où un changement manuel annule une cible. Absent = défaut.
    */
   preheatMaxLeadMin?: number;
+  /**
+   * Délai avant absence, en minutes : un capteur de présence passé à « absent » ne l'est qu'après
+   * ce temps sans nouvelle détection. Ne s'applique ni au forçage par Flow ni à la présence de
+   * Homey. Absent = défaut.
+   */
+  presenceOffDelayMin?: number;
 }
 
 /** Instantané du monde à l'instant T. Aucune de ces valeurs n'est lue par le noyau lui-même. */

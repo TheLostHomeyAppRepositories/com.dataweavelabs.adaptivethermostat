@@ -33,6 +33,7 @@ import type {
 import { formatLocalHhMm, nextOccurrenceMs } from '../../lib/localTime.mjs';
 import { fitOutdoorRateModel, predictRate } from '../../lib/preheat.mjs';
 import { isWeatherMisused } from '../../lib/weather.mjs';
+import { DEFAULT_PRESENCE_OFF_DELAY_MIN, isPresenceMisused } from '../../lib/presence.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { CapValue } from '../../runtime/hub.mjs';
 import { HomeyEmitterAdapter, type EmitterAdapter } from '../../runtime/emitter.mjs';
@@ -163,6 +164,7 @@ export default class VThermDevice extends Homey.Device {
       defaults: { preset: 'comfort', manualSetpoint: config.presetTemps.comfort },
       nowMs: Date.now(),
       roomSensorIsEmitter: () => this.roomSensorIsEmitter(),
+      houseActivityAtMs: (nowMs) => app.houseActivityAtMs(nowMs),
     });
 
     if (this.presenceOverride !== 'auto') this.participant.forcePresence(this.presenceOverride);
@@ -383,16 +385,15 @@ export default class VThermDevice extends Homey.Device {
   }
 
   /**
-   * Même lecture que celle qui alimente le noyau : le forçage Flow prime, une mesure périmée ou
-   * absente ne déclare personne absent. Sans cet alignement, une condition pourrait dire « absent »
+   * Même lecture que celle qui alimente le noyau : le forçage Flow prime, le délai avant absence
+   * s'applique, une mesure périmée ou absente ne déclare personne absent. Sans cet alignement, une condition pourrait dire « absent »
    * pendant que la régulation applique une température de présence.
    */
   isSomeoneHome(): boolean {
+    if (this.participant !== null) return this.participant.isSomeoneHome(Date.now());
     if (this.presenceOverride !== 'auto') return this.presenceOverride === 'home';
-
-    const reading = this.sources.presence?.read(Date.now(), FRESHNESS.presenceMs) ?? null;
-    if (reading === null || reading.stale) return true;
-    return reading.value !== false && reading.value !== 0;
+    // Pas encore de participant (démarrage) : rien ne régule encore, personne n'est déclaré absent.
+    return true;
   }
 
   // --- Cartes Flow : actions --------------------------------------------------
@@ -684,7 +685,7 @@ export default class VThermDevice extends Homey.Device {
       throw new Error(this.homey.__('pair.error.incomplete'));
     }
     // La météo comme capteur de pièce chaufferait sur la température du dehors.
-    if (isWeatherMisused(key, deviceId)) throw new Error(this.homey.__('settings.sources.invalid_device'));
+    if (isWeatherMisused(key, deviceId) || isPresenceMisused(key, deviceId)) throw new Error(this.homey.__('settings.sources.invalid_device'));
 
     if (key === 'emitter') {
       // Re-désigner « l'émetteur » remplace la tête n°1 SANS toucher aux suivantes : c'est la voie
@@ -856,7 +857,10 @@ export default class VThermDevice extends Homey.Device {
     this.sources[slot] = this.app.hub.bind(
       deviceId,
       resolved,
-      () => this.app.requestTick(`${this.deviceId()}:${key}`),
+      () => {
+        this.app.requestTick(`${this.deviceId()}:${key}`);
+        if (key === 'motion' || key === 'presence') this.app.noteActivity();
+      },
     );
     this.app.requestTick(`${this.deviceId()}:${key}:bound`);
   }
@@ -886,7 +890,7 @@ export default class VThermDevice extends Homey.Device {
    * du groupe resterait figée sur sa dernière ouverture, chauffée par personne.
    */
   async setEmitterIds(ids: readonly string[]): Promise<void> {
-    if (ids.some((id) => isWeatherMisused('emitter', id))) {
+    if (ids.some((id) => isWeatherMisused('emitter', id) || isPresenceMisused('emitter', id))) {
       throw new Error(this.homey.__('settings.sources.invalid_device'));
     }
     // SÉRIALISÉ, parce que la page de réparation appelle ceci à CHAQUE case cochée et qu'un
@@ -1051,6 +1055,7 @@ export default class VThermDevice extends Homey.Device {
       },
       useCentralMode: bool(s, 'use_central_mode', true),
       preheatMaxLeadMin: num(s, 'preheat_max_lead_min', DEFAULT_PREHEAT_MAX_LEAD_MIN),
+      presenceOffDelayMin: num(s, 'presence_off_delay', DEFAULT_PRESENCE_OFF_DELAY_MIN),
     };
   }
 

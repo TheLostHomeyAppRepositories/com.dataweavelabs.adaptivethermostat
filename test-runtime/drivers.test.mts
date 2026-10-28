@@ -46,6 +46,7 @@ class FakeApp {
       owner.devices.filter((device) => device.capabilities.includes(capabilityId)),
     getDeviceSummary: async (deviceId: string): Promise<DeviceSummary | null> =>
       owner.devices.find((device) => device.id === deviceId) ?? null,
+    presenceSummary: (): Pick<DeviceSummary, 'id' | 'name'> => ({ id: 'homey:presence', name: 'presence.source_name' }),
   };
 
   trace(message: string): void {
@@ -194,7 +195,20 @@ test('un détecteur de présence qui ne publie que `alarm_presence` reste trouva
   const driver = vthermDriver(newApp([mmwave]));
 
   assert.deepEqual((await driver.listCandidates({ source: 'motion' })).map((c) => c.id), ['mmwave']);
-  assert.deepEqual((await driver.listCandidates({ source: 'presence' })).map((c) => c.id), ['mmwave']);
+  assert.deepEqual(
+    (await driver.listCandidates({ source: 'presence' })).map((c) => c.id),
+    ['homey:presence', 'mmwave'],
+    'la présence de Homey en tête, les capteurs ensuite',
+  );
+});
+
+test('la présence de Homey n\'est proposée que pour la présence', async () => {
+  const mmwave = summaryOf({
+    id: 'mmwave', name: 'mmWave salon', deviceClass: 'sensor', capabilities: ['alarm_presence'],
+  });
+  const driver = vthermDriver(newApp([mmwave]));
+
+  assert.deepEqual((await driver.listCandidates({ source: 'motion' })).map((c) => c.id), ['mmwave']);
 });
 
 test('sans hub, la liste ne se contente pas d\'être vide : elle le DIT', async () => {

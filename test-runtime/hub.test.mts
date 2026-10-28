@@ -89,6 +89,11 @@ const fakeApi = {
       return { z1: { id: 'z1', name: 'Chaufferie' } };
     },
   },
+  users: {
+    async getUsers(): Promise<unknown> {
+      return { u1: { name: 'A', enabled: true, present: false }, u2: { name: 'B', enabled: true, present: true } };
+    },
+  },
   weather: {
     async getWeather(): Promise<unknown> {
       return { city: 'Palais-Royal', temperature: 9.5, temperatureCelsius: 9.5, when: new Date().toISOString() };
@@ -333,4 +338,27 @@ test('l\'identifiant réservé météo se lie comme un capteur : nom, capability
 
   await hub.stop();
   assert.equal(binding.read(Date.now(), 2 * 60 * 60_000), null, 'arrêter le hub relâche la météo');
+});
+
+// --- Présence de Homey --------------------------------------------------------
+
+test('l\'identifiant réservé présence se lie comme un détecteur, en absence confirmée', async () => {
+  const { PRESENCE_SOURCE_ID } = await import('../lib/presence.mjs');
+  const hub = newHub();
+  await hub.start();
+
+  const summary = await hub.getDeviceSummary(PRESENCE_SOURCE_ID);
+  assert.equal(summary?.name, 'presence.source_name');
+  assert.deepEqual(summary?.capabilities, ['alarm_presence']);
+  assert.equal(summary?.available, false, 'aucune lecture encore : la source ne paraît pas saine');
+
+  const binding = hub.bind(PRESENCE_SOURCE_ID, 'alarm_presence');
+  await hub.presence.maybeFetch(Date.now());
+  assert.equal((await hub.getDeviceSummary(PRESENCE_SOURCE_ID))?.available, true);
+  assert.equal(binding.read(Date.now(), 7 * 24 * 60 * 60_000)?.value, true, 'un utilisateur à la maison suffit');
+  assert.equal(binding.confirmedAbsence, true, 'la géolocalisation ne subit pas le délai avant absence');
+  await assert.rejects(binding.write(false, { nowMs: 0 }), 'une présence géolocalisée ne s\'écrit pas');
+
+  await hub.stop();
+  assert.equal(binding.read(Date.now(), 60_000), null, 'arrêter le hub relâche la présence');
 });

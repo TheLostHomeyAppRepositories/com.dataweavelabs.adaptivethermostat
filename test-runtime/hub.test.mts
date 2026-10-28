@@ -323,9 +323,11 @@ test('l\'identifiant réservé météo se lie comme un capteur : nom, capability
   const summary = await hub.getDeviceSummary(WEATHER_SOURCE_ID);
   assert.equal(summary?.name, 'weather.source_name');
   assert.deepEqual(summary?.capabilities, ['measure_temperature']);
+  assert.equal(summary?.available, false, 'aucune lecture encore : la source ne paraît pas saine');
 
   const binding = hub.bind(WEATHER_SOURCE_ID, 'measure_temperature');
   await hub.weather.maybeFetch(Date.now());
+  assert.equal((await hub.getDeviceSummary(WEATHER_SOURCE_ID))?.available, true);
   assert.equal(binding.read(Date.now(), 2 * 60 * 60_000)?.value, 9.5);
   await assert.rejects(binding.write(1, { nowMs: 0 }), 'une température météo ne s\'écrit pas');
 

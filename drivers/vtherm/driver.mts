@@ -12,6 +12,7 @@ import Homey from 'homey';
 import { DEFAULT_WINDOW } from '../../lib/constants.mjs';
 import type { Preset } from '../../lib/types.mjs';
 import { PREHEAT_PRESETS } from '../../lib/preheat.mjs';
+import { isWeatherMisused } from '../../lib/weather.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { PresenceOverride } from '../../runtime/participants.mjs';
 import type VThermApp from '../../app.mjs';
@@ -80,7 +81,9 @@ export default class VThermDriver extends Homey.Driver {
 
     for (const { event, key } of SELECT_EVENTS) {
       session.setHandler(event, async (deviceId: unknown) => {
-        selection.set(key, asDeviceId(deviceId));
+        const id = asDeviceId(deviceId);
+        if (isWeatherMisused(key, id)) throw new Error(this.homey.__('settings.sources.invalid_device'));
+        selection.set(key, id);
         return true;
       });
     }
@@ -91,6 +94,9 @@ export default class VThermDriver extends Homey.Driver {
     for (const event of EMITTER_SELECT_EVENTS) {
       session.setHandler(event, async (data: unknown) => {
         const ids = asDeviceIds(data);
+        if (ids.some((id) => isWeatherMisused('emitter', id))) {
+          throw new Error(this.homey.__('settings.sources.invalid_device'));
+        }
         // Refusé AU CLIC et pas à la création, pour que les deux chemins s'accordent : la page de
         // réparation refuse déjà là. Sinon l'utilisateur coche une vanne et une prise, traverse
         // quatre écrans de capteurs facultatifs, et n'apprend qu'au bouton « Créer » que le mélange

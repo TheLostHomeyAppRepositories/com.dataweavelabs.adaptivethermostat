@@ -11,7 +11,9 @@
  */
 
 import { computeStale } from '../lib/freshness.mjs';
-import { parseWeatherReading, WEATHER_POLL_MS, type WeatherReading } from '../lib/weather.mjs';
+import {
+  parseWeatherReading, WEATHER_FETCH_TIMEOUT_MS, WEATHER_POLL_MS, WEATHER_RETRY_MS, type WeatherReading,
+} from '../lib/weather.mjs';
 import type { CapValue } from '../lib/writePolicy.mjs';
 import type { Reading } from '../lib/types.mjs';
 import type { SourceBinding, WriteRequest } from './hub.mjs';
@@ -22,6 +24,8 @@ export interface WeatherFeedOptions {
   /** Rend la réponse brute de `getWeather()`, ou lève si l'API n'est pas joignable. */
   fetch: () => Promise<unknown>;
   pollMs?: number;
+  retryMs?: number;
+  timeoutMs?: number;
   error?: Logger;
 }
 
@@ -31,9 +35,18 @@ export class WeatherFeed {
   private inFlight: Promise<void> | null = null;
   private readonly subscribers = new Set<WeatherBinding>();
   private readonly pollMs: number;
+  private readonly retryMs: number;
+  private readonly timeoutMs: number;
 
   constructor(private readonly options: WeatherFeedOptions) {
     this.pollMs = options.pollMs ?? WEATHER_POLL_MS;
+    this.retryMs = options.retryMs ?? WEATHER_RETRY_MS;
+    this.timeoutMs = options.timeoutMs ?? WEATHER_FETCH_TIMEOUT_MS;
+  }
+
+  /** Vrai quand au moins une liaison existe ET qu'aucune lecture exploitable n'est arrivée. */
+  get unavailable(): boolean {
+    return this.latest === null;
   }
 
   /** La dernière température lue, `null` avant la première réponse exploitable. */
@@ -65,10 +78,25 @@ export class WeatherFeed {
     if (nowMs - this.lastFetchAtMs < this.pollMs) return;
 
     this.lastFetchAtMs = nowMs;
+    // En cas d'échec, la prochaine tentative vient après `retryMs`, pas après `pollMs`.
+    const retryAfterFailure = (): void => {
+      this.lastFetchAtMs = nowMs - this.pollMs + this.retryMs;
+    };
     this.inFlight = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const reading = parseWeatherReading(await this.options.fetch(), nowMs);
-        if (reading === null) return;
+        const raw = await Promise.race([
+          this.options.fetch(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('délai dépassé')), this.timeoutMs);
+          }),
+        ]);
+        const reading = parseWeatherReading(raw, nowMs);
+        if (reading === null) {
+          this.options.error?.('Météo de Homey : réponse sans température datée en °C.');
+          retryAfterFailure();
+          return;
+        }
         const changed = this.latest === null
           || this.latest.value !== reading.value
           || this.latest.atMs !== reading.atMs;
@@ -77,8 +105,10 @@ export class WeatherFeed {
           for (const subscriber of this.subscribers) subscriber.notify(reading);
         }
       } catch (err) {
-        // Pas de nouvelle tentative avant `pollMs` : marteler une API qui refuse n'arrange rien.
         this.options.error?.('Météo de Homey injoignable :', err);
+        retryAfterFailure();
+      } finally {
+        clearTimeout(timer);
       }
     })().finally(() => {
       this.inFlight = null;
@@ -119,7 +149,11 @@ class WeatherBinding implements SourceBinding {
     throw new Error('La météo de Homey est une source en lecture seule.');
   }
 
-  /** @internal */
+  /**
+   * @internal Prévient l'abonné qu'une nouvelle observation est arrivée. Le `Reading` transmis ne
+   * porte pas de fraîcheur fiable — le seuil appartient au lecteur : l'abonné doit relire par
+   * `read()`, comme le fait le participant, qui ne s'en sert que pour demander un tick.
+   */
   notify(reading: WeatherReading): void {
     if (this.destroyed) return;
     this.onChange?.({ value: reading.value, atMs: reading.atMs, stale: false });

@@ -26,13 +26,13 @@ function feed(responses: unknown[]): { feed: WeatherFeed; calls: () => number } 
 }
 
 test('personne n\'écoute : aucune requête', async () => {
-  const { feed: weather, calls } = feed([{ temperature: 5 }]);
+  const { feed: weather, calls } = feed([{ temperature: 5, when: '2026-10-28T10:00:00Z' }]);
   await weather.maybeFetch(Date.now());
   assert.equal(calls(), 0);
 });
 
 test('une seule requête pour tous les thermostats, puis au plus une toutes les 10 min', async () => {
-  const { feed: weather, calls } = feed([{ temperature: 5, when: new Date(0).toISOString() }]);
+  const { feed: weather, calls } = feed([{ temperature: 5, when: '2026-10-28T10:00:00Z' }]);
   const a = weather.bind();
   const b = weather.bind();
   await weather.maybeFetch(Date.now());
@@ -74,20 +74,22 @@ test('un nouveau relevé prévient les thermostats ; un relevé identique, non',
   binding.destroy();
 });
 
-test('API injoignable : la dernière lecture reste, et la requête n\'est pas martelée', async () => {
+test('API injoignable : la dernière lecture reste, nouvel essai après 1 min et pas avant', async () => {
   const { feed: weather, calls } = feed([{ temperature: 5, when: '2026-10-28T10:00:00Z' }, new Error('hors ligne')]);
   const binding = weather.bind();
   await weather.maybeFetch(Date.now());
   const t0 = Date.now();
   await weather.maybeFetch(t0 + 11 * MIN);
-  await weather.maybeFetch(t0 + 12 * MIN);
-  assert.equal(calls(), 2);
+  await weather.maybeFetch(t0 + 11 * MIN + 30_000);
+  assert.equal(calls(), 2, 'pas de nouvel essai à chaque tick');
+  await weather.maybeFetch(t0 + 12 * MIN + 1_000);
+  assert.equal(calls(), 3);
   assert.equal(binding.read(Date.parse('2026-10-28T10:30:00Z'), 2 * HOUR)?.value, 5);
   binding.destroy();
 });
 
 test('écrire sur la météo lève, et une liaison détruite ne lit plus rien', async () => {
-  const { feed: weather } = feed([{ temperature: 5 }]);
+  const { feed: weather } = feed([{ temperature: 5, when: '2026-10-28T10:00:00Z' }]);
   const binding = weather.bind();
   await weather.maybeFetch(Date.now());
   await assert.rejects(binding.write(3, { nowMs: 0 }));
@@ -96,10 +98,39 @@ test('écrire sur la météo lève, et une liaison détruite ne lit plus rien', 
 });
 
 test('stop() relâche toutes les liaisons : plus aucune requête ensuite', async () => {
-  const { feed: weather, calls } = feed([{ temperature: 5 }]);
+  const { feed: weather, calls } = feed([{ temperature: 5, when: '2026-10-28T10:00:00Z' }]);
   weather.bind();
   await weather.maybeFetch(Date.now());
   weather.stop();
   await weather.maybeFetch(Date.now() + HOUR);
   assert.equal(calls(), 1);
+});
+
+test('au démarrage, l\'API absente ne bloque pas la météo dix minutes', async () => {
+  // La première liaison arrive avant que l'API Homey soit montée : cette requête-là échoue.
+  const { feed: weather, calls } = feed([new Error('API météo indisponible'), { temperature: 7, when: '2026-10-28T10:00:00Z' }]);
+  const binding = weather.bind();
+  await weather.maybeFetch(Date.now());
+  const t0 = Date.now();
+  await weather.maybeFetch(t0 + 61_000);
+  assert.equal(calls(), 2);
+  assert.equal(binding.read(Date.parse('2026-10-28T10:10:00Z'), 2 * HOUR)?.value, 7);
+  binding.destroy();
+});
+
+test('une requête qui ne répond jamais est abandonnée au délai, et la suivante repart', async () => {
+  let calls = 0;
+  const weather = new WeatherFeed({
+    fetch: () => {
+      calls += 1;
+      return calls === 1 ? new Promise(() => undefined) : Promise.resolve({ temperature: 4, when: '2026-10-28T10:00:00Z' });
+    },
+    timeoutMs: 20,
+  });
+  const binding = weather.bind();
+  await weather.maybeFetch(Date.now());
+  await weather.maybeFetch(Date.now() + 61_000);
+  assert.equal(calls, 2);
+  assert.equal(weather.reading?.value, 4);
+  binding.destroy();
 });

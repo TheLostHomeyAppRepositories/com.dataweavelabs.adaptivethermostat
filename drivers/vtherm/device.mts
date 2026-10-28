@@ -864,20 +864,21 @@ export default class VThermDevice extends Homey.Device {
     // re-résolution à l'arrivée du hub passe directement par cette méthode, et remplacer la
     // référence sans détruire laisserait un abonnement websocket orphelin à vie. `destroy()` est
     // idempotent, donc le double appel du chemin normal ne coûte rien.
+    // La présence de Homey n'est pas une activité dans la maison : seuls les vrais détecteurs.
+    const isDetector = (key === 'motion' || key === 'presence') && deviceId !== PRESENCE_SOURCE_ID;
     this.sources[slot]?.destroy();
     this.sources[slot] = this.app.hub.bind(
       deviceId,
       resolved,
       () => {
         this.app.requestTick(`${this.deviceId()}:${key}`);
-        // La présence de Homey n'est pas une activité dans la maison : seuls les vrais détecteurs.
-        if ((key === 'motion' || key === 'presence') && deviceId !== PRESENCE_SOURCE_ID) this.app.noteActivity();
+        if (isDetector) this.app.noteActivity();
       },
     );
     this.app.requestTick(`${this.deviceId()}:${key}:bound`);
     // Un détecteur qui se rattache apporte enfin sa vraie dernière activité : les thermostats qui
     // suivent la présence de Homey doivent la voir, pas attendre leur échéance.
-    if ((key === 'motion' || key === 'presence') && deviceId !== PRESENCE_SOURCE_ID) this.app.noteActivity();
+    if (isDetector) this.app.noteActivity();
   }
 
   private sourceId(key: SourceKey): string | null {

@@ -78,18 +78,22 @@ test('présent, périmé ou sans lecture : rien à retenir', () => {
 });
 
 test('activité d\'un détecteur : retombé, voyant, bloqué, périmé ou muet', () => {
-  assert.equal(detectorActivityAtMs({ value: false, atMs: NOW - 5 * MIN, stale: false }, NOW), NOW - 5 * MIN);
-  assert.equal(detectorActivityAtMs({ value: true, atMs: NOW - 5 * MIN, stale: false }, NOW), NOW);
+  assert.equal(detectorActivityAtMs({ value: false, atMs: NOW - 5 * MIN, stale: false }, NOW, null), NOW - 5 * MIN);
+  assert.equal(detectorActivityAtMs({ value: true, atMs: NOW - 5 * MIN, stale: false }, NOW, NOW - 5 * MIN), NOW);
   assert.equal(
-    detectorActivityAtMs({ value: true, atMs: NOW - 2 * ACTIVITY_STUCK_MS, stale: false }, NOW),
+    detectorActivityAtMs({ value: true, atMs: NOW - MIN, stale: false }, NOW, NOW - 2 * ACTIVITY_STUCK_MS),
     NOW - ACTIVITY_STUCK_MS,
-    'un « quelqu\'un » figé cesse de compter douze heures après son dernier changement',
+    'un « quelqu\'un » figé cesse de compter douze heures après le premier vrai vu, re-rapports ou non',
   );
   assert.equal(
-    detectorActivityAtMs({ value: false, atMs: NOW - 5 * MIN, stale: true }, NOW), NOW - 5 * MIN,
+    detectorActivityAtMs({ value: true, atMs: NOW - 2 * ACTIVITY_STUCK_MS, stale: false }, NOW, null), NOW,
+    'sans borne (vrai capteur de présence), une nuit entière à vrai reste de l\'activité',
+  );
+  assert.equal(
+    detectorActivityAtMs({ value: false, atMs: NOW - 5 * MIN, stale: true }, NOW, null), NOW - 5 * MIN,
     'hors ligne, il garde la dernière activité vue au lieu de l\'effacer',
   );
-  assert.equal(detectorActivityAtMs(null, NOW), null);
+  assert.equal(detectorActivityAtMs(null, NOW, null), null);
 });
 
 test('mouvement seul : `alarm_motion` et ses sous-capabilities, rien d\'autre', () => {

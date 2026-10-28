@@ -69,19 +69,28 @@ export function trueSinceMs(reading: Reading<boolean> | null, previous: number |
 }
 
 /**
+ * Au-delà, on n'a pas regardé le détecteur assez longtemps pour savoir s'il est resté à vrai sans
+ * interruption : son « vrai depuis » repart de la lecture courante. Sans cette borne, un détecteur
+ * vu à vrai il y a une semaine, puis ignoré — forçage par Flow, famille géolocalisée à la maison —
+ * paraîtrait figé à l'instant même où quelqu'un passe devant lui.
+ */
+export const DETECTOR_OBSERVATION_GAP_MS = 30 * 60_000;
+
+/**
  * Dernière activité qu'une lecture de détecteur atteste : l'instant où il est retombé, ou
- * maintenant s'il voit quelqu'un — au plus `ACTIVITY_STUCK_MS` après `sinceMs`, l'instant où il est
- * passé à vrai. `null` si le détecteur n'a rien rapporté. Une lecture périmée compte encore : un
- * détecteur hors ligne garde la dernière activité qu'il a vue, il ne l'efface pas.
+ * maintenant s'il voit quelqu'un. `stuckSinceMs` borne ce « maintenant » à `ACTIVITY_STUCK_MS`
+ * après le premier « vrai » vu sans interruption ; `null` ne borne rien — un vrai capteur de
+ * présence reste légitimement à vrai toute une nuit. `null` si le détecteur n'a rien rapporté. Une
+ * lecture périmée compte encore : un détecteur hors ligne garde la dernière activité qu'il a vue.
  */
 export function detectorActivityAtMs(
   reading: Reading<boolean> | null,
   nowMs: number,
-  sinceMs: number | null = reading?.atMs ?? null,
+  stuckSinceMs: number | null,
 ): number | null {
   if (reading === null) return null;
   if (!reading.value) return reading.atMs;
-  return Math.min(nowMs, (sinceMs ?? reading.atMs) + ACTIVITY_STUCK_MS);
+  return stuckSinceMs === null ? nowMs : Math.min(nowMs, stuckSinceMs + ACTIVITY_STUCK_MS);
 }
 
 /** La présence de Homey ne peut tenir lieu QUE de source de présence. */

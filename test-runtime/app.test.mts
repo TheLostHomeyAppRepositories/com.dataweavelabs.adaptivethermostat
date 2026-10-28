@@ -338,5 +338,10 @@ test('l\'activité de la maison se calcule une fois par instant, pas une fois pa
   app.houseActivityAtMs(2_000);
   assert.equal(scans, 2);
 
+  // Un détecteur qui change au même instant invalide ce qu'on avait calculé.
+  app.noteActivity();
+  app.houseActivityAtMs(2_000);
+  assert.equal(scans, 3);
+
   await app.onUninit();
 });

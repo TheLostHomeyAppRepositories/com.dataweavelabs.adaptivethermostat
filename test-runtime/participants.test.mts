@@ -666,10 +666,12 @@ test('un détecteur bloqué sur « quelqu\'un » ne retient la maison que douze 
   const HOUR = 60 * 60_000;
   const nowMs = 100 * HOUR;
   const motion = new FakeBinding(true, nowMs - 2 * HOUR);
+  motion.capabilityId = 'alarm_motion';
   const { participant } = world('valve', { motion });
   assert.equal(participant.lastActivityAtMs(nowMs), nowMs, 'deux heures de présence : actif maintenant');
 
   const stuck = new FakeBinding(true, nowMs - 3 * 24 * HOUR);
+  stuck.capabilityId = 'alarm_motion';
   const { participant: other } = world('valve', { motion: stuck });
   assert.equal(
     other.lastActivityAtMs(nowMs), nowMs - 3 * 24 * HOUR + 12 * HOUR,
@@ -681,15 +683,48 @@ test('un détecteur figé qui RE-RAPPORTE la même valeur est quand même vu fig
   const HOUR = 60 * 60_000;
   const t0 = 100 * HOUR;
   const motion = new FakeBinding(true, t0);
+  motion.capabilityId = 'alarm_motion';
   const { participant } = world('valve', { motion });
-  participant.lastActivityAtMs(t0);
 
-  // `lastUpdated` avance à chaque rapport, la valeur ne change jamais.
+  // `lastUpdated` avance à chaque rapport, la valeur ne change jamais ; on regarde à chaque pas.
+  for (let atMs = t0; atMs < t0 + 13 * HOUR; atMs += 20 * 60_000) {
+    motion.setReading(true, atMs);
+    participant.lastActivityAtMs(atMs);
+  }
   motion.setReading(true, t0 + 13 * HOUR - 60_000);
   assert.equal(
     participant.lastActivityAtMs(t0 + 13 * HOUR), t0 + 12 * HOUR,
     'compté depuis le premier « vrai » vu, pas depuis le dernier rapport',
   );
+});
+
+test('un vrai capteur de présence à vrai toute la nuit reste de l\'activité', () => {
+  const HOUR = 60 * 60_000;
+  const nowMs = 100 * HOUR;
+  const radar = new FakeBinding(true, nowMs - 20 * HOUR);
+  radar.capabilityId = 'alarm_presence';
+  const { participant } = world('valve', { presence: radar });
+  assert.equal(participant.lastActivityAtMs(nowMs), nowMs, 'la nounou endormie devant le mmWave');
+});
+
+test('un détecteur qu\'on n\'a pas regardé ne paraît pas figé, et la mémoire ne recule pas', () => {
+  const HOUR = 60 * 60_000;
+  const t0 = 100 * HOUR;
+  const motion = new FakeBinding(true, t0);
+  motion.capabilityId = 'alarm_motion';
+  const { participant } = world('valve', { motion });
+  participant.lastActivityAtMs(t0);
+
+  // Une semaine sans le regarder, puis quelqu'un passe : il vient de rapporter, il n'est pas figé.
+  const later = t0 + 7 * 24 * HOUR;
+  motion.setReading(true, later - 60_000);
+  assert.equal(participant.lastActivityAtMs(later), later);
+
+  // Une lecture datée d'avant ne réécrit pas la mémoire.
+  motion.setReading(false, later - 2 * HOUR);
+  participant.lastActivityAtMs(later - HOUR);
+  motion.setReading(true, later + 60_000);
+  assert.equal(participant.lastActivityAtMs(later + 2 * 60_000), later + 2 * 60_000);
 });
 
 test('un détecteur re-désigné repart de zéro', () => {
@@ -715,6 +750,9 @@ test('présence par détecteur de mouvement figé : l\'absence vient douze heure
   await participant.tick(t0);
   assert.equal(host.getCapabilityValue('vtherm_presence'), true);
   assert.ok(participant.dueAtMs() <= t0 + 12 * HOUR, 'réveil à la borne du figé');
+
+  room.setReading(19, t0 + 12 * HOUR + 45 * 60_000);
+  await participant.tick(t0 + 12 * HOUR + 45 * 60_000);
 
   room.setReading(19, t0 + 13 * HOUR + 60_000);
   presence.setReading(true, t0 + 13 * HOUR);

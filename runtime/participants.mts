@@ -24,8 +24,8 @@ import {
 import { createBoilerState, ignitionAllowedAtMs, stepBoiler } from '../lib/boilerAggregator.mjs';
 import { addPreheatTarget, targetsAfterManualChange } from '../lib/preheat.mjs';
 import {
-  ACTIVITY_STUCK_MS, DEFAULT_PRESENCE_OFF_DELAY_MIN, detectorActivityAtMs, holdAbsence,
-  isMotionOnlyCapability, trueSinceMs,
+  ACTIVITY_STUCK_MS, DEFAULT_PRESENCE_OFF_DELAY_MIN, DETECTOR_OBSERVATION_GAP_MS, detectorActivityAtMs,
+  holdAbsence, isMotionOnlyCapability, trueSinceMs,
 } from '../lib/presence.mjs';
 import { restoreVThermState } from '../lib/state.mjs';
 import { stepVTherm } from '../lib/step.mjs';
@@ -239,6 +239,12 @@ function readNumber(
   return { value: reading.value, atMs: reading.atMs, stale: reading.stale };
 }
 
+interface DetectorMemory {
+  activityAtMs: number | null;
+  trueSinceMs: number | null;
+  observedAtMs: number | null;
+}
+
 export function readBoolean(
   binding: SourceBinding | null,
   nowMs: number,
@@ -297,9 +303,9 @@ export class VThermParticipant implements Tickable {
    * Ce que l'on sait de chaque détecteur, par LIAISON — une re-désignation par Réparer repart de
    * zéro au lieu d'hériter du passé de l'ancien appareil. `activityAtMs` : dernière activité lue,
    * qu'un détecteur momentanément illisible garde au lieu de faire croire la maison calme.
-   * `trueSinceMs` : voir `trueSinceMs()`.
+   * `trueSinceMs` : voir `trueSinceMs()`. `observedAtMs` : dernière lecture exploitable vue.
    */
-  private readonly detectors = new WeakMap<SourceBinding, { activityAtMs: number | null; trueSinceMs: number | null }>();
+  private readonly detectors = new WeakMap<SourceBinding, DetectorMemory>();
   /** Instant de création : l'activité d'un détecteur jamais encore lu, faute de mieux. */
   private readonly createdAtMs: number;
   private lastTickAtMs: number | null = null;
@@ -557,8 +563,12 @@ export class VThermParticipant implements Tickable {
     const consider = (key: 'motion' | 'presence', freshnessMs: number): void => {
       const binding = this.sources[key];
       if (binding === null || binding.confirmedAbsence === true) return;
-      const known = this.observeDetector(binding, readBoolean(binding, nowMs, freshnessMs), nowMs);
-      const atMs = known.activityAtMs ?? this.createdAtMs;
+      const reading = readBoolean(binding, nowMs, freshnessMs);
+      const known = this.observeDetector(binding, reading, nowMs);
+      // La borne du figé ne vaut que pour le mouvement : un mmWave reste à vrai toute une nuit
+      // devant une nounou endormie, et la maison n'est pas vide pour autant.
+      const stuckSince = isMotionOnlyCapability(binding.capabilityId) ? known.trueSinceMs : null;
+      const atMs = detectorActivityAtMs(reading, nowMs, stuckSince) ?? known.activityAtMs ?? this.createdAtMs;
       if (latest === null || atMs > latest) latest = atMs;
     };
     consider('motion', FRESHNESS.motionMs);
@@ -566,19 +576,28 @@ export class VThermParticipant implements Tickable {
     return latest;
   }
 
-  /** Met à jour, puis rend, ce que l'on sait d'un détecteur. Idempotent pour un même instant. */
-  private observeDetector(
-    binding: SourceBinding,
-    reading: Reading<boolean> | null,
-    nowMs: number,
-  ): { activityAtMs: number | null; trueSinceMs: number | null } {
-    const previous = this.detectors.get(binding) ?? { activityAtMs: null, trueSinceMs: null };
-    const since = trueSinceMs(reading, previous.trueSinceMs);
-    const known = {
-      activityAtMs: detectorActivityAtMs(reading, nowMs, since) ?? previous.activityAtMs,
+  /**
+   * Met à jour, puis rend, ce que l'on sait d'un détecteur. Idempotent pour un même instant.
+   *
+   * Un appel dont l'instant précède la dernière observation — une condition Flow à l'heure murale
+   * pendant un pas daté plus tôt — lit sans écrire : la mémoire ne recule jamais. Une lecture
+   * absente ne compte pas comme une observation : un détecteur resté hors ligne plus que
+   * `DETECTOR_OBSERVATION_GAP_MS` n'a pas été vu à vrai sans interruption.
+   */
+  private observeDetector(binding: SourceBinding, reading: Reading<boolean> | null, nowMs: number): DetectorMemory {
+    const previous = this.detectors.get(binding)
+      ?? { activityAtMs: null, trueSinceMs: null, observedAtMs: null };
+    const watched = previous.observedAtMs !== null && nowMs - previous.observedAtMs <= DETECTOR_OBSERVATION_GAP_MS;
+    const since = trueSinceMs(reading, watched ? previous.trueSinceMs : null);
+    const activityAtMs = detectorActivityAtMs(
+      reading, nowMs, isMotionOnlyCapability(binding.capabilityId) ? since : null,
+    );
+    const known: DetectorMemory = {
+      activityAtMs: activityAtMs ?? previous.activityAtMs,
       trueSinceMs: since,
+      observedAtMs: reading === null ? previous.observedAtMs : nowMs,
     };
-    this.detectors.set(binding, known);
+    if (previous.observedAtMs === null || nowMs >= previous.observedAtMs) this.detectors.set(binding, known);
     return known;
   }
 

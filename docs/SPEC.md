@@ -135,9 +135,12 @@ présence périmée vaut « présent ». Les abonnés ne sont prévenus que d'un
 soit calme depuis le délai avant absence — dernière activité de n'importe quel détecteur de
 mouvement ou de présence (capteur réel) de n'importe quel thermostat (`App.houseActivityAtMs`,
 `detectorActivityAtMs`). Activité d'un détecteur : l'instant où il est retombé ; maintenant s'il
-voit quelqu'un, mais au plus 12 h après le premier « vrai » vu sans interruption
-(`ACTIVITY_STUCK_MS`, `trueSinceMs` : pile morte, chat devant un radar ; compté par le lecteur et
-non depuis `lastUpdated`, qu'un re-rapport de la même valeur fait avancer) ; une lecture périmée
+voit quelqu'un — pour un détecteur de mouvement (`alarm_motion*`), au plus 12 h après le premier
+« vrai » vu sans interruption (`ACTIVITY_STUCK_MS`, `trueSinceMs` : pile morte, chat devant un
+capteur ; compté par le lecteur et non depuis `lastUpdated`, qu'un re-rapport de la même valeur fait
+avancer ; un détecteur non regardé plus de 30 min, `DETECTOR_OBSERVATION_GAP_MS`, repart de sa
+lecture courante). Un vrai capteur de présence n'a pas cette borne : il voit légitimement une nuit
+entière quelqu'un qui dort ; une lecture périmée
 compte encore. Un détecteur illisible garde sa dernière activité connue (mémoire du participant,
 par liaison : une re-désignation repart de zéro), et un détecteur jamais lu compte comme actif à
 la création du thermostat — la maison n'est pas vidée au démarrage, au prix d'au plus un délai de

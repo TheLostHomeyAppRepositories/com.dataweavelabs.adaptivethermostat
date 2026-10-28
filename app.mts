@@ -161,12 +161,14 @@ export default class VThermApp extends Homey.App {
   // --- Registre --------------------------------------------------------------
 
   registerVTherm(participant: VThermParticipant): void {
+    this.houseActivityMemo = null;
     this.vtherms.set(participant.tickId, participant);
     participant.setValveBackend(this.valveBackendImpl);
     this.schedulerImpl?.requestTick(`register:${participant.tickId}`);
   }
 
   unregisterVTherm(id: string): void {
+    this.houseActivityMemo = null;
     if (!this.vtherms.delete(id)) return;
     this.schedulerImpl?.requestTick(`unregister:${id}`);
   }
@@ -229,6 +231,8 @@ export default class VThermApp extends Homey.App {
    * le logement à chaque mouvement, la charge que `targetsFor` existe pour éviter.
    */
   noteActivity(): void {
+    // Un détecteur vient de changer : ce qu'on avait calculé à cet instant ne vaut plus.
+    this.houseActivityMemo = null;
     for (const participant of this.vtherms.values()) {
       if (participant.followsHouseActivity) {
         this.schedulerImpl?.requestTick(`${participant.tickId}:house-activity`);

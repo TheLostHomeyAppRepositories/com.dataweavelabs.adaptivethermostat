@@ -321,3 +321,22 @@ test('un mouvement ne réveille que les thermostats qui suivent la présence de 
 
   await app.onUninit();
 });
+
+test('l\'activité de la maison se calcule une fois par instant, pas une fois par thermostat suiveur', async () => {
+  const { app, participant } = await boot('valve');
+  let scans = 0;
+  const original = participant.lastActivityAtMs.bind(participant);
+  participant.lastActivityAtMs = (nowMs: number) => {
+    scans += 1;
+    return original(nowMs);
+  };
+
+  app.houseActivityAtMs(1_000);
+  app.houseActivityAtMs(1_000);
+  app.houseActivityAtMs(1_000);
+  assert.equal(scans, 1);
+  app.houseActivityAtMs(2_000);
+  assert.equal(scans, 2);
+
+  await app.onUninit();
+});

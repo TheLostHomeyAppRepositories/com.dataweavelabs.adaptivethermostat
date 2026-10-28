@@ -24,7 +24,8 @@ import {
 import { createBoilerState, ignitionAllowedAtMs, stepBoiler } from '../lib/boilerAggregator.mjs';
 import { addPreheatTarget, targetsAfterManualChange } from '../lib/preheat.mjs';
 import {
-  DEFAULT_PRESENCE_OFF_DELAY_MIN, detectorActivityAtMs, holdAbsence, MOTION_ONLY_CAPABILITY,
+  ACTIVITY_STUCK_MS, DEFAULT_PRESENCE_OFF_DELAY_MIN, detectorActivityAtMs, holdAbsence,
+  isMotionOnlyCapability, trueSinceMs,
 } from '../lib/presence.mjs';
 import { restoreVThermState } from '../lib/state.mjs';
 import { stepVTherm } from '../lib/step.mjs';
@@ -238,7 +239,7 @@ function readNumber(
   return { value: reading.value, atMs: reading.atMs, stale: reading.stale };
 }
 
-function readBoolean(
+export function readBoolean(
   binding: SourceBinding | null,
   nowMs: number,
   freshnessMs: number,
@@ -293,11 +294,12 @@ export class VThermParticipant implements Tickable {
   private demandValue: Demand = { kind: 'unknown' };
   private wakeUpAt: number | null = null;
   /**
-   * Dernière activité lue sur chaque détecteur de ce thermostat. Un détecteur momentanément
-   * illisible — liaison pas encore rattachée, appareil disparu — garde ainsi la dernière qu'il a
-   * vue au lieu de faire croire la maison calme.
+   * Ce que l'on sait de chaque détecteur, par LIAISON — une re-désignation par Réparer repart de
+   * zéro au lieu d'hériter du passé de l'ancien appareil. `activityAtMs` : dernière activité lue,
+   * qu'un détecteur momentanément illisible garde au lieu de faire croire la maison calme.
+   * `trueSinceMs` : voir `trueSinceMs()`.
    */
-  private readonly lastActivity = new Map<'motion' | 'presence', number>();
+  private readonly detectors = new WeakMap<SourceBinding, { activityAtMs: number | null; trueSinceMs: number | null }>();
   /** Instant de création : l'activité d'un détecteur jamais encore lu, faute de mieux. */
   private readonly createdAtMs: number;
   private lastTickAtMs: number | null = null;
@@ -518,7 +520,15 @@ export class VThermParticipant implements Tickable {
     if (binding?.confirmedAbsence !== true) {
       // Seul un détecteur de MOUVEMENT retombe dès que personne ne bouge. Un capteur de présence —
       // mmWave, appareil virtuel piloté par géofence, état d'alarme — dit déjà l'absence.
-      if (binding?.capabilityId !== MOTION_ONLY_CAPABILITY) return { reading, wakeUpAtMs: null };
+      if (binding === null || !isMotionOnlyCapability(binding.capabilityId)) return { reading, wakeUpAtMs: null };
+      // Figé sur « quelqu'un » depuis plus de `ACTIVITY_STUCK_MS` (pile morte, animal) : il compte
+      // comme retombé à cette borne, et le délai court ensuite.
+      const since = this.observeDetector(binding, reading, nowMs).trueSinceMs;
+      if (reading !== null && reading.value && since !== null) {
+        const stuckAtMs = since + ACTIVITY_STUCK_MS;
+        if (nowMs < stuckAtMs) return { reading, wakeUpAtMs: stuckAtMs };
+        return holdAbsence({ ...reading, value: false, atMs: stuckAtMs }, nowMs, delayMs);
+      }
       return holdAbsence(reading, nowMs, delayMs);
     }
 
@@ -547,14 +557,29 @@ export class VThermParticipant implements Tickable {
     const consider = (key: 'motion' | 'presence', freshnessMs: number): void => {
       const binding = this.sources[key];
       if (binding === null || binding.confirmedAbsence === true) return;
-      const read = detectorActivityAtMs(readBoolean(binding, nowMs, freshnessMs), nowMs);
-      if (read !== null) this.lastActivity.set(key, read);
-      const atMs = read ?? this.lastActivity.get(key) ?? this.createdAtMs;
+      const known = this.observeDetector(binding, readBoolean(binding, nowMs, freshnessMs), nowMs);
+      const atMs = known.activityAtMs ?? this.createdAtMs;
       if (latest === null || atMs > latest) latest = atMs;
     };
     consider('motion', FRESHNESS.motionMs);
     consider('presence', FRESHNESS.presenceMs);
     return latest;
+  }
+
+  /** Met à jour, puis rend, ce que l'on sait d'un détecteur. Idempotent pour un même instant. */
+  private observeDetector(
+    binding: SourceBinding,
+    reading: Reading<boolean> | null,
+    nowMs: number,
+  ): { activityAtMs: number | null; trueSinceMs: number | null } {
+    const previous = this.detectors.get(binding) ?? { activityAtMs: null, trueSinceMs: null };
+    const since = trueSinceMs(reading, previous.trueSinceMs);
+    const known = {
+      activityAtMs: detectorActivityAtMs(reading, nowMs, since) ?? previous.activityAtMs,
+      trueSinceMs: since,
+    };
+    this.detectors.set(binding, known);
+    return known;
   }
 
   /** Ce thermostat suit-il la présence de Homey, donc l'activité de toute la maison ? */

@@ -81,6 +81,7 @@ export default class VThermApp extends Homey.App {
   private schedulerImpl: Scheduler | null = null;
 
   private readonly vtherms = new Map<string, VThermParticipant>();
+  private houseActivityMemo: { nowMs: number; atMs: number | null } | null = null;
   private central: CentralParticipant | null = null;
   private valveBackendImpl: ValveBackend | null = null;
   /** Dernière disponibilité connue de la dorsale : on n'agit que sur les TRANSITIONS. */
@@ -209,11 +210,15 @@ export default class VThermApp extends Homey.App {
    * Homey : personne de géolocalisé ne veut pas dire maison vide.
    */
   houseActivityAtMs(nowMs: number): number | null {
+    // Une fois par instant : chaque thermostat suiveur la demande au même pas du cycle, et la
+    // recalculer pour chacun parcourrait tous les détecteurs autant de fois.
+    if (this.houseActivityMemo?.nowMs === nowMs) return this.houseActivityMemo.atMs;
     let latest: number | null = null;
     for (const participant of this.vtherms.values()) {
       const atMs = participant.lastActivityAtMs(nowMs);
       if (atMs !== null && (latest === null || atMs > latest)) latest = atMs;
     }
+    this.houseActivityMemo = { nowMs, atMs: latest };
     return latest;
   }
 

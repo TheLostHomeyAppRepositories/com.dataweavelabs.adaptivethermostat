@@ -135,21 +135,28 @@ présence périmée vaut « présent ». Les abonnés ne sont prévenus que d'un
 soit calme depuis le délai avant absence — dernière activité de n'importe quel détecteur de
 mouvement ou de présence (capteur réel) de n'importe quel thermostat (`App.houseActivityAtMs`,
 `detectorActivityAtMs`). Activité d'un détecteur : l'instant où il est retombé ; maintenant s'il
-voit quelqu'un, mais au plus 12 h après son dernier changement (`ACTIVITY_STUCK_MS` : pile morte,
-chat devant un radar) ; une lecture périmée compte encore. Un détecteur illisible garde sa dernière
-activité connue (mémoire du participant), et un détecteur jamais lu compte comme actif à la
-création du thermostat — la maison n'est pas vidée au démarrage. Un changement de ces détecteurs
+voit quelqu'un, mais au plus 12 h après le premier « vrai » vu sans interruption
+(`ACTIVITY_STUCK_MS`, `trueSinceMs` : pile morte, chat devant un radar ; compté par le lecteur et
+non depuis `lastUpdated`, qu'un re-rapport de la même valeur fait avancer) ; une lecture périmée
+compte encore. Un détecteur illisible garde sa dernière activité connue (mémoire du participant,
+par liaison : une re-désignation repart de zéro), et un détecteur jamais lu compte comme actif à
+la création du thermostat — la maison n'est pas vidée au démarrage, au prix d'au plus un délai de
+présence après chaque redémarrage. Un détecteur qui se rattache, comme un détecteur qui change,
+fait tiquer les suiveurs. L'activité de la maison est calculée une fois par instant. Un changement de ces détecteurs
 fait tiquer, chacun nommé, les seuls thermostats qui suivent la présence de Homey (`noteActivity`).
 Sans aucun détecteur dans la maison, la géolocalisation décide seule. Limites : un utilisateur sans
 géolocalisation reste `present: false` ; un utilisateur actif resté « à la maison » (téléphone
 perdu) garde le logement présent — désactiver le compte.
 
 **Délai avant absence** (`presence_off_delay`, 60 min par défaut, 0 à 720). Une source de présence
-qui ne publie que `alarm_motion` (détecteur de mouvement, caméra) ne déclare le logement vide
-qu'après ce délai sans nouvelle détection. L'instant de référence est l'horodatage du passage à
+qui ne publie que `alarm_motion` ou une de ses sous-capabilities (détecteur de mouvement, caméra
+en `alarm_motion.person`) ne déclare le logement vide qu'après ce délai sans nouvelle détection ;
+figée sur vrai plus de 12 h, elle compte comme retombée à cette borne. L'instant de référence est l'horodatage du passage à
 faux (`lastUpdated`), donc le délai ne tient aucun état et survit au redémarrage ; le participant
 annonce un réveil à l'échéance. Un vrai capteur de présence (`alarm_presence`, `alarm_occupancy` :
-mmWave, appareil virtuel géofencé, état d'alarme) et le forçage par Flow s'appliquent sans délai ;
+mmWave, appareil virtuel géofencé, état d'alarme) et le forçage par Flow s'appliquent sans délai —
+compromis assumé : un mmWave qui retomberait sur une pièce immobile n'est pas retenu ; choisir alors
+la présence de Homey, qui s'appuie sur l'activité de toute la maison ;
 pour la Présence de Homey (`SourceBinding.confirmedAbsence`), le délai compte depuis la dernière
 activité de la maison (ci-dessus). Motif : un radar choisi comme présence retombait dès que
 personne ne bougeait, et un Boost de préchauffe s'appliquait à sa température d'absence dans un

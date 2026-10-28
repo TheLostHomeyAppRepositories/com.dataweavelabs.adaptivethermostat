@@ -13,6 +13,7 @@
  * Pur : le hub va chercher les utilisateurs, ce module ne fait que les lire.
  */
 
+import { matchesCapability } from './capabilityMatch.mjs';
 import type { Reading } from './types.mjs';
 
 /**
@@ -45,23 +46,42 @@ export const DEFAULT_PRESENCE_OFF_DELAY_MIN = 60;
 export const ACTIVITY_STUCK_MS = 12 * 60 * 60_000;
 
 /**
- * Seule capability de présence qui ne dit QUE le mouvement : celle-là retombe dès que personne ne
- * bouge et demande le délai avant absence. Un `alarm_presence` ou `alarm_occupancy` — mmWave,
- * appareil virtuel « quelqu'un à la maison » piloté par géofence, état d'une alarme — dit déjà la
- * présence, et son absence s'applique tout de suite, comme avant le délai.
+ * Une capability qui ne dit QUE le mouvement — `alarm_motion` ou l'une de ses sous-capabilities,
+ * comme `alarm_motion.person` d'une caméra. Elle retombe dès que personne ne bouge et demande le
+ * délai avant absence. Un `alarm_presence` ou `alarm_occupancy` — mmWave, appareil virtuel
+ * « quelqu'un à la maison » piloté par géofence, état d'une alarme — dit déjà la présence, et son
+ * absence s'applique tout de suite, comme avant le délai.
  */
-export const MOTION_ONLY_CAPABILITY = 'alarm_motion';
+export function isMotionOnlyCapability(capabilityId: string | undefined): boolean {
+  return capabilityId !== undefined && matchesCapability([capabilityId], 'alarm_motion');
+}
+
+/**
+ * Depuis quand un détecteur dit « quelqu'un » SANS INTERRUPTION. `lastUpdated` ne suffit pas : un
+ * détecteur figé qui re-rapporte la même valeur le fait avancer, et ne paraîtrait jamais figé. Le
+ * lecteur garde donc la première fois qu'il l'a vu passer à vrai. `null` quand il dit « personne » ;
+ * une lecture absente ne change rien à ce qu'on savait.
+ */
+export function trueSinceMs(reading: Reading<boolean> | null, previous: number | null): number | null {
+  if (reading === null) return previous;
+  if (!reading.value) return null;
+  return previous ?? reading.atMs;
+}
 
 /**
  * Dernière activité qu'une lecture de détecteur atteste : l'instant où il est retombé, ou
- * maintenant s'il voit quelqu'un — borné par `ACTIVITY_STUCK_MS` depuis son dernier changement.
- * `null` si le détecteur n'a rien rapporté. Une lecture périmée compte encore : un détecteur
- * hors ligne garde la dernière activité qu'il a vue, il ne l'efface pas.
+ * maintenant s'il voit quelqu'un — au plus `ACTIVITY_STUCK_MS` après `sinceMs`, l'instant où il est
+ * passé à vrai. `null` si le détecteur n'a rien rapporté. Une lecture périmée compte encore : un
+ * détecteur hors ligne garde la dernière activité qu'il a vue, il ne l'efface pas.
  */
-export function detectorActivityAtMs(reading: Reading<boolean> | null, nowMs: number): number | null {
+export function detectorActivityAtMs(
+  reading: Reading<boolean> | null,
+  nowMs: number,
+  sinceMs: number | null = reading?.atMs ?? null,
+): number | null {
   if (reading === null) return null;
   if (!reading.value) return reading.atMs;
-  return Math.min(nowMs, reading.atMs + ACTIVITY_STUCK_MS);
+  return Math.min(nowMs, (sinceMs ?? reading.atMs) + ACTIVITY_STUCK_MS);
 }
 
 /** La présence de Homey ne peut tenir lieu QUE de source de présence. */

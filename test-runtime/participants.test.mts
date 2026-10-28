@@ -669,11 +669,72 @@ test('un détecteur bloqué sur « quelqu\'un » ne retient la maison que douze 
   const { participant } = world('valve', { motion });
   assert.equal(participant.lastActivityAtMs(nowMs), nowMs, 'deux heures de présence : actif maintenant');
 
-  motion.setReading(true, nowMs - 3 * 24 * HOUR);
+  const stuck = new FakeBinding(true, nowMs - 3 * 24 * HOUR);
+  const { participant: other } = world('valve', { motion: stuck });
   assert.equal(
-    participant.lastActivityAtMs(nowMs), nowMs - 3 * 24 * HOUR + 12 * HOUR,
+    other.lastActivityAtMs(nowMs), nowMs - 3 * 24 * HOUR + 12 * HOUR,
     'pile morte ou chat : sans borne, la famille partie en congé chaufferait au Confort une semaine',
   );
+});
+
+test('un détecteur figé qui RE-RAPPORTE la même valeur est quand même vu figé', () => {
+  const HOUR = 60 * 60_000;
+  const t0 = 100 * HOUR;
+  const motion = new FakeBinding(true, t0);
+  const { participant } = world('valve', { motion });
+  participant.lastActivityAtMs(t0);
+
+  // `lastUpdated` avance à chaque rapport, la valeur ne change jamais.
+  motion.setReading(true, t0 + 13 * HOUR - 60_000);
+  assert.equal(
+    participant.lastActivityAtMs(t0 + 13 * HOUR), t0 + 12 * HOUR,
+    'compté depuis le premier « vrai » vu, pas depuis le dernier rapport',
+  );
+});
+
+test('un détecteur re-désigné repart de zéro', () => {
+  const MIN = 60_000;
+  const nowMs = 300 * MIN;
+  const old = new FakeBinding(false, nowMs - 5 * MIN);
+  const { participant } = world('valve', { motion: old });
+  assert.equal(participant.lastActivityAtMs(nowMs), nowMs - 5 * MIN);
+
+  // Réparer remplace la liaison ; la nouvelle n'a encore rien lu.
+  (participant as unknown as { sources: { motion: FakeBinding } }).sources.motion = new FakeBinding();
+  assert.equal(participant.lastActivityAtMs(nowMs + MIN), 0, 'pas l\'historique de l\'appareil retiré');
+});
+
+test('présence par détecteur de mouvement figé : l\'absence vient douze heures plus le délai après', async () => {
+  const HOUR = 60 * 60_000;
+  const t0 = 100 * HOUR;
+  const presence = new FakeBinding(true, t0);
+  presence.capabilityId = 'alarm_motion';
+  const { host, room, participant } = world('valve', { presence });
+
+  room.setReading(19, t0);
+  await participant.tick(t0);
+  assert.equal(host.getCapabilityValue('vtherm_presence'), true);
+  assert.ok(participant.dueAtMs() <= t0 + 12 * HOUR, 'réveil à la borne du figé');
+
+  room.setReading(19, t0 + 13 * HOUR + 60_000);
+  presence.setReading(true, t0 + 13 * HOUR);
+  await participant.tick(t0 + 13 * HOUR + 60_000);
+  assert.equal(
+    host.getCapabilityValue('vtherm_presence'), false,
+    'figé depuis 13 h : retombé à 12 h, puis une heure de délai — une semaine de chauffe sinon',
+  );
+});
+
+test('une caméra en `alarm_motion.person` a aussi droit au délai', async () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  const presence = new FakeBinding(false, nowMs - 10 * MIN);
+  presence.capabilityId = 'alarm_motion.person';
+  const { host, room, participant } = world('valve', { presence });
+
+  room.setReading(19, nowMs);
+  await participant.tick(nowMs);
+  assert.equal(host.getCapabilityValue('vtherm_presence'), true);
 });
 
 test('l\'activité d\'un thermostat : maintenant si son détecteur voit, sinon l\'instant où il est retombé', () => {

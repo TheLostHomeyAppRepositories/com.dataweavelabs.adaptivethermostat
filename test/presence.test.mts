@@ -9,7 +9,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ACTIVITY_STUCK_MS, detectorActivityAtMs, holdAbsence, isPresenceMisused, parseUsersPresence, PRESENCE_SOURCE_ID,
+  ACTIVITY_STUCK_MS, detectorActivityAtMs, holdAbsence, isMotionOnlyCapability, isPresenceMisused, parseUsersPresence,
+  PRESENCE_SOURCE_ID, trueSinceMs,
 } from '../lib/presence.mjs';
 
 const MIN = 60_000;
@@ -89,4 +90,21 @@ test('activité d\'un détecteur : retombé, voyant, bloqué, périmé ou muet',
     'hors ligne, il garde la dernière activité vue au lieu de l\'effacer',
   );
   assert.equal(detectorActivityAtMs(null, NOW), null);
+});
+
+test('mouvement seul : `alarm_motion` et ses sous-capabilities, rien d\'autre', () => {
+  assert.equal(isMotionOnlyCapability('alarm_motion'), true);
+  assert.equal(isMotionOnlyCapability('alarm_motion.person'), true);
+  assert.equal(isMotionOnlyCapability('alarm_presence'), false);
+  assert.equal(isMotionOnlyCapability('alarm_occupancy'), false);
+  assert.equal(isMotionOnlyCapability('alarm_motion_sensitivity'), false);
+  assert.equal(isMotionOnlyCapability(undefined), false);
+});
+
+test('« vrai depuis » : le premier vrai vu, effacé au premier faux, inchangé sans lecture', () => {
+  const on = (atMs: number) => ({ value: true, atMs, stale: false });
+  assert.equal(trueSinceMs(on(NOW), null), NOW);
+  assert.equal(trueSinceMs(on(NOW + MIN), NOW), NOW, 'un re-rapport ne rajeunit pas');
+  assert.equal(trueSinceMs({ value: false, atMs: NOW, stale: false }, NOW - MIN), null);
+  assert.equal(trueSinceMs(null, NOW - MIN), NOW - MIN);
 });

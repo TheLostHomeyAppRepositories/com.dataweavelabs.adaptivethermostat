@@ -33,13 +33,15 @@ import type {
 import { formatLocalHhMm, nextOccurrenceMs } from '../../lib/localTime.mjs';
 import { fitOutdoorRateModel, predictRate } from '../../lib/preheat.mjs';
 import { isWeatherMisused } from '../../lib/weather.mjs';
-import { DEFAULT_PRESENCE_OFF_DELAY_MIN, isPresenceMisused, PRESENCE_SOURCE_ID } from '../../lib/presence.mjs';
+import {
+  DEFAULT_PRESENCE_OFF_DELAY_MIN, isMotionOnlyCapability, isPresenceMisused, PRESENCE_SOURCE_ID,
+} from '../../lib/presence.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { CapValue } from '../../runtime/hub.mjs';
 import { HomeyEmitterAdapter, type EmitterAdapter } from '../../runtime/emitter.mjs';
 import { MultiEmitterAdapter } from '../../runtime/multiEmitter.mjs';
 import {
-  FRESHNESS, VThermParticipant,
+  FRESHNESS, readBoolean, VThermParticipant,
   type DeviceHost, type ParticipantEvent, type PresenceOverride, type VThermSourceBindings,
 } from '../../runtime/participants.mjs';
 import type VThermApp from '../../app.mjs';
@@ -393,11 +395,16 @@ export default class VThermDevice extends Homey.Device {
     if (this.participant !== null) return this.participant.isSomeoneHome(Date.now());
     if (this.presenceOverride !== 'auto') return this.presenceOverride === 'home';
 
-    // Pas encore de participant (démarrage) : la lecture brute du capteur, sans délai ni activité
-    // — ce que disait la condition avant eux. Absente ou périmée, elle ne déclare personne absent.
-    const reading = this.sources.presence?.read(Date.now(), FRESHNESS.presenceMs) ?? null;
-    if (reading === null || reading.stale) return true;
-    return reading.value !== false && reading.value !== 0;
+    // Pas encore de participant (démarrage). Un vrai capteur de présence se lit tel quel, comme le
+    // ferait le participant. Un détecteur de mouvement ou la présence de Homey demandent un délai
+    // ou l'activité de la maison, qu'on ne sait pas encore : « présent », comme toute lecture
+    // inconnue, plutôt qu'un « absent » que le participant démentirait quelques secondes après.
+    const binding = this.sources.presence;
+    if (binding === null || binding.confirmedAbsence === true || isMotionOnlyCapability(binding.capabilityId)) {
+      return true;
+    }
+    const reading = readBoolean(binding, Date.now(), FRESHNESS.presenceMs);
+    return reading === null || reading.stale || reading.value;
   }
 
   // --- Cartes Flow : actions --------------------------------------------------
@@ -868,6 +875,9 @@ export default class VThermDevice extends Homey.Device {
       },
     );
     this.app.requestTick(`${this.deviceId()}:${key}:bound`);
+    // Un détecteur qui se rattache apporte enfin sa vraie dernière activité : les thermostats qui
+    // suivent la présence de Homey doivent la voir, pas attendre leur échéance.
+    if ((key === 'motion' || key === 'presence') && deviceId !== PRESENCE_SOURCE_ID) this.app.noteActivity();
   }
 
   private sourceId(key: SourceKey): string | null {

@@ -246,10 +246,11 @@ export const PREHEAT_LEARNED_AFTER_EPISODES = 3;
 export const PREHEAT_MAX_TARGETS = 4;
 
 /**
- * Une cible dépassée de plus de 12 h au chargement est jetée : l'app revenue le soir n'a plus à
- * imposer le Confort du matin. En deçà, le premier pas la bascule normalement.
+ * Une cible dépassée de plus de 2 h au chargement est jetée : l'app revenue à 18 h 30 n'a plus à
+ * imposer le Confort de 7 h. En deçà, le premier pas la bascule normalement — un Homey redémarré à
+ * 7 h 20 doit encore mettre la pièce en Confort.
  */
-export const PREHEAT_STALE_TARGET_MS = 12 * 60 * 60 * 1000;
+export const PREHEAT_STALE_TARGET_MS = 2 * 60 * 60 * 1000;
 
 /** Bornes de l'apprentissage par épisodes (voir lib/preheat.mts). */
 export const PREHEAT_EPISODE = {

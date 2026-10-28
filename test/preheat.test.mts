@@ -207,10 +207,23 @@ test('critère 13 : fenêtre ouverte au milieu, épisode rejeté et compté, app
   assert.equal(result.learning.ratePerHour, createPreheatLearning().ratePerHour);
 });
 
-test('critère 13 : demande unknown pendant l\'épisode, rejet motif demand', () => {
+test('critère 13 : demande unknown tout du long, rejet motif demand à l\'arrivée', () => {
+  const { learning } = replay([[0, 19.0], [12, 19.1], [120, 21.8]], createPreheatLearning(), { demand: { kind: 'unknown' } });
+  assert.equal(learning.lastRejectReason, 'demand');
+});
+
+test('une demande unknown isolée ne rejette pas la remontée : la tête n\'a pas encore répondu', () => {
   const started = replay([[0, 19.0]]);
-  const result = stepEpisode(started.episode, started.learning, observation({ demand: { kind: 'unknown' } }), 5 * MIN);
-  assert.equal(result.learning.lastRejectReason, 'demand');
+  const blip = stepEpisode(started.episode, started.learning, observation({ roomTemp: 19.0, demand: { kind: 'unknown' } }), 5 * MIN);
+  assert.notEqual(blip.episode, null);
+  assert.equal(blip.learning.rejected, 0);
+});
+
+test('consigne abaissée en route (fenêtre, Éco du soir) : la remontée est comptée interrompue', () => {
+  const started = replay([[0, 19.0], [12, 19.1]]);
+  const result = stepEpisode(started.episode, started.learning, observation({ setpoint: 7, previousSetpoint: 22 }), 20 * MIN);
+  assert.equal(result.episode, null);
+  assert.equal(result.learning.lastRejectReason, 'interrupted');
 });
 
 test('une hausse avant toute demande est ignorée, pas rejetée : la tête peut signaler en retard', () => {

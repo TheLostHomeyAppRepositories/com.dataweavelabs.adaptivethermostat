@@ -355,17 +355,17 @@ test('préchauffe, critère 14 : cibles corrompues filtrées une par une, au plu
   assert.deepEqual(migrated.preheatTargets.map((t) => t.atMs), [now + 1, now + 2, now + 3, now + 4]);
 });
 
-test('préchauffe, critère 14 : cible dépassée de 13 h jetée, de 2 h conservée', () => {
+test('préchauffe, critère 14 : Homey revenu à 18 h 30, le Confort de 7 h est jeté ; à 7 h 20, conservé', () => {
   const now = 100 * 3_600_000;
   const raw = {
     ...createPersistentState(now, { preset: 'comfort', manualSetpoint: 19 }),
     preheatTargets: [
-      { preset: 'comfort', atMs: now - 13 * 3_600_000 },
-      { preset: 'eco', atMs: now - 2 * 3_600_000 },
+      { preset: 'comfort', atMs: now - 11.5 * 3_600_000 },
+      { preset: 'eco', atMs: now - 20 * 60_000 },
     ],
   };
   const migrated = migratePersistentState(raw, now, { preset: 'comfort', manualSetpoint: 19 });
-  assert.deepEqual(migrated.preheatTargets, [{ preset: 'eco', atMs: now - 2 * 3_600_000 }]);
+  assert.deepEqual(migrated.preheatTargets, [{ preset: 'eco', atMs: now - 20 * 60_000 }]);
 });
 
 test('préchauffe : un apprentissage corrompu retombe sur les défauts champ par champ', () => {

@@ -18,7 +18,7 @@ import type {
 } from '../lib/types.mjs';
 import type { BoilerParams, BoilerResult, BoilerState } from '../lib/types.mjs';
 import {
-  BOILER_DIVERGENCE_RETRY_SEC, DEFAULT_PREHEAT_MAX_LEAD_MIN, SETPOINT_MAX, SETPOINT_MIN,
+  BOILER_DIVERGENCE_RETRY_SEC, DEFAULT_PREHEAT_MAX_LEAD_MIN, PREHEAT_MAX_TARGETS, SETPOINT_MAX, SETPOINT_MIN,
   STALE_MEASUREMENT_SEC, TIMED_PRESET_MAX_MINUTES, TIMED_PRESET_MIN_MINUTES,
 } from '../lib/constants.mjs';
 import { createBoilerState, ignitionAllowedAtMs, stepBoiler } from '../lib/boilerAggregator.mjs';
@@ -738,7 +738,9 @@ export class VThermParticipant implements Tickable {
   addPreheatTarget(preset: PreheatPreset, atMs: number): void {
     if (!Number.isFinite(atMs)) return;
     const next = addPreheatTarget(this.state.persistent.preheatTargets, { preset, atMs });
-    if (next === null) throw new Error(this.host.translate('device.preheat.full'));
+    if (next === null) {
+      throw new Error(this.host.translate('device.preheat.full').replace('{max}', String(PREHEAT_MAX_TARGETS)));
+    }
     this.mutate({ preheatTargets: next }, 'preheat-target');
   }
 
@@ -782,10 +784,14 @@ export class VThermParticipant implements Tickable {
     }
   }
 
-  cancelTimedPreset(): void {
+  cancelTimedPreset(nowMs: number = Date.now()): void {
     const timed = this.state.persistent.timedPreset;
     if (timed === null) return;
-    this.mutate({ preset: timed.previous, timedPreset: null }, 'cancel-timed-preset');
+    this.mutate({
+      preset: timed.previous,
+      timedPreset: null,
+      preheatTargets: this.targetsAfterManualChange(nowMs),
+    }, 'cancel-timed-preset');
   }
 
   setWindowBypass(bypass: boolean): void {

@@ -731,22 +731,27 @@ sous l'Éco quitterait le Confort en avance. `écart = T(preset en présence) �
 moins de 3 remontées ont été apprises. La variante absence est ignorée : la nuit, une présence au
 mouvement vaut souvent « absent » et ferait arriver en retard.
 
-**Annulation.** Tout changement manuel (tuile, `set_preset`, consigne, preset temporisé) annule les
-cibles dont la fenêtre `[échéance − preset_max_lead_min, échéance]` contient l'instant du changement.
+**Annulation.** Tout changement manuel (tuile, `set_preset`, consigne, preset temporisé posé ou
+annulé) annule les cibles dont la fenêtre `[échéance − preset_max_lead_min, échéance]` contient
+l'instant du changement. Les cartes Flow `set_preset` et consigne comptent comme manuelles : un Flow
+« Éco à 6 h » annule « Confort à 7 h ». Après la bascule, la présence s'applique comme d'habitude :
+absent, c'est la variante absence du preset qui est visée.
 
 **Apprentissage.** Toute remontée en régulation nominale est un épisode : début au pas où la
 consigne CHANGE et dépasse la pièce d'au moins 1 °C (un écart qui dure sans changement n'ouvre rien,
 pas d'épisode parasite après un plateau) ; temps mort jusqu'à la première hausse de 0,1 °C vue après
 une demande de chaleur ; fin à consigne − 0,2 °C, ou plateau (aucune nouvelle hausse pendant 45 min,
-montée arrêtée à la première atteinte du maximum). Consigne changée en route : l'épisode est remplacé
-dans le même pas, sans rejet compté. Écarté et compté avec son motif : chauffe coupée ou abaissée,
-capteur muet, aucune demande de chaleur, plus de 12 h (chauffage au sol), montée < 0,5 °C, vitesse
+montée arrêtée à la première atteinte du maximum). Consigne relevée en route : l'épisode est remplacé
+dans le même pas, sans rejet compté ; abaissée (fenêtre, arrêt central, Éco du soir) : compté
+« interrompu ». Une demande inconnue isolée est neutre. Écarté et compté avec son motif : chauffe
+coupée ou abaissée, capteur muet, aucune demande de chaleur vue de toute la montée, plus de 12 h (chauffage au sol), montée < 0,5 °C, vitesse
 hors [0,2 ; 6] °C/h, sonde à trop grands pas (frémissement et arrivée sur la même lecture). Un
 capteur biaisé de 0,5 °C décale l'avance d'environ 0,5 / vitesse, pas plus. Poids `max(0,3 ; 1/(n+1))`. Pas d'apprentissage quand le capteur de pièce est l'un
 des émetteurs. Défauts : 15 min, 1 °C/h. Le réglage « Ce qu'elle a appris » l'affiche.
 
 Températures comparées en dixièmes entiers. Persisté : cibles et apprentissage (écriture immédiate) ;
-l'épisode en cours est volatile. Cible dépassée de plus de 12 h au chargement : jetée.
+l'épisode en cours est volatile. Cible dépassée de plus de 2 h au chargement : jetée (Homey revenu à 18 h 30 n'impose pas le Confort
+de 7 h ; revenu à 7 h 20, il l'applique).
 
 Lot 2 (hors périmètre) : modèle dépendant de l'extérieur — les 10 derniers épisodes acceptés gardent
 leur température extérieure moyenne. Le nombre de pièces chauffant en même temps n'est pas encore

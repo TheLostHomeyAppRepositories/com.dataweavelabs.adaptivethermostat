@@ -141,7 +141,8 @@ export function stepPreheatTargets(input: PreheatTargetsInput, nowMs: number): P
   const due = starts.filter((entry) => nowMs >= entry.startAtMs).at(-1);
   const pending = due === undefined ? starts : starts.filter((entry) => entry.target.atMs > due.target.atMs);
   // Calculé dans le même appel : une bascule n'impose pas un pas supplémentaire juste pour
-  // regarder la suivante. Une suivante déjà due rend un réveil échu, donc un rappel immédiat.
+  // regarder la suivante. Les restantes sont toutes postérieures à la plus tardive due : aucune
+  // n'est due, le réveil est toujours dans le futur.
   const wakeUpAtMs = pending.length === 0 ? null : Math.min(...pending.map((entry) => entry.startAtMs));
 
   return {
@@ -301,10 +302,16 @@ export function stepEpisode(
    * nuit le fait tous les jours — donc rien n'est compté. Rouvrir au pas suivant datait le départ un
    * cycle trop tard, et le temps mort appris d'autant trop court.
    */
-  const current = episode !== null && tenths(obs.setpoint) !== tenths(episode.setpoint) ? null : episode;
+  const changed = episode !== null && tenths(obs.setpoint) !== tenths(episode.setpoint);
+  const current = changed ? null : episode;
+  // Une consigne ABAISSÉE en route (fenêtre, arrêt central, Éco du soir) interrompt la montée : elle
+  // est comptée, sinon une pièce aux fenêtres souvent ouvertes n'apprendrait jamais sans dire pourquoi.
+  const base = changed && episode !== null && tenths(obs.setpoint) < tenths(episode.setpoint)
+    ? reject(learning, 'interrupted').learning
+    : learning;
 
   if (current === null) {
-    const idle: EpisodeResult = { episode: null, learning };
+    const idle: EpisodeResult = { episode: null, learning: base };
     if (!obs.regulating || obs.roomTemp === null) return idle;
     if (obs.previousSetpoint === null || tenths(obs.setpoint) === tenths(obs.previousSetpoint)) return idle;
     if (tenths(obs.setpoint) - tenths(obs.roomTemp) < tenths(PREHEAT_EPISODE.minGap)) return idle;
@@ -324,13 +331,12 @@ export function stepEpisode(
         outdoorSum: obs.outdoorTemp ?? 0,
         outdoorCount: obs.outdoorTemp === null ? 0 : 1,
       },
-      learning,
+      learning: base,
     };
   }
 
   if (!obs.regulating) return reject(learning, 'interrupted');
   if (obs.roomTemp === null) return reject(learning, 'sensor');
-  if (obs.demand.kind === 'unknown') return reject(learning, 'demand');
   if (nowMs - current.startMs > PREHEAT_EPISODE.maxDurationMs) return reject(learning, 'too_long');
 
   const room = obs.roomTemp;
@@ -343,6 +349,9 @@ export function stepEpisode(
     outdoorCount: current.outdoorCount + (obs.outdoorTemp === null ? 0 : 1),
   };
 
+  // Une demande `unknown` (tête en mode consigne qui n'a pas encore répondu) est neutre : elle ne
+  // marque pas la demande vue, sans rejeter pour autant. Une montée sans AUCUNE demande vue est
+  // rejetée à l'arrivée, motif `demand`.
   // Une hausse avant toute demande est ignorée, pas rejetée : en mode consigne, la tête peut ne
   // signaler qu'elle chauffe qu'au cycle suivant. Le frémissement attend la première demande vue.
   if (next.riseAtMs === null && next.demandSeen && tenths(room) >= tenths(next.startTemp) + step) {

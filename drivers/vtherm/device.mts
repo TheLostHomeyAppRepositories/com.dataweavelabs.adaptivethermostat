@@ -25,7 +25,8 @@ import {
   DEFAULT_MIN_ACTIVATION_SEC, DEFAULT_MIN_DEACTIVATION_SEC,
   DEFAULT_OPENING_THRESHOLD, DEFAULT_PRESET_TEMPS, DEFAULT_REGULATION_THRESHOLD, DEFAULT_SLOPE,
   DEFAULT_TPI, DEFAULT_WINDOW, DEFAULT_AWAY_TEMPS, DEFAULT_SAFETY, DEFAULT_PREHEAT_MAX_LEAD_MIN,
-  PREHEAT_LEARNED_AFTER_EPISODES } from '../../lib/constants.mjs';
+  PREHEAT_DEFAULT_DEAD_TIME_MIN, PREHEAT_DEFAULT_RATE_PER_HOUR, PREHEAT_EPISODE, PREHEAT_LEARNED_AFTER_EPISODES,
+  PREHEAT_UNLEARNED_MAX_LEAD_MIN } from '../../lib/constants.mjs';
 import type {
   Preset, PreheatLearning, PreheatPreset, VThermConfig,
 } from '../../lib/types.mjs';
@@ -452,16 +453,23 @@ export default class VThermDevice extends Homey.Device {
     } else if (learning.accepted === 0) {
       text = learning.rejected === 0
         ? t('status_none')
+          .replace('{rate}', String(PREHEAT_DEFAULT_RATE_PER_HOUR))
+          .replace('{dead}', String(PREHEAT_DEFAULT_DEAD_TIME_MIN))
         : t('status_rejected')
           .replace('{rejected}', String(learning.rejected))
-          .replace('{reason}', t(`reason_${learning.lastRejectReason ?? 'too_small'}`));
+          .replace('{reason}', t(`reason_${learning.lastRejectReason ?? 'too_small'}`)
+            .replace('{hours}', String(PREHEAT_EPISODE.maxDurationMs / 3_600_000)));
     } else {
       text = t('status_learned')
         .replace('{rate}', learning.ratePerHour.toFixed(1))
         .replace('{dead}', String(Math.round(learning.deadTimeMin)))
         .replace('{accepted}', String(learning.accepted))
         .replace('{rejected}', String(learning.rejected));
-      if (learning.accepted < PREHEAT_LEARNED_AFTER_EPISODES) text += ` ${t('status_capped')}`;
+      if (learning.accepted < PREHEAT_LEARNED_AFTER_EPISODES) {
+        text += ` ${t('status_capped')
+          .replace('{cap}', String(PREHEAT_UNLEARNED_MAX_LEAD_MIN))
+          .replace('{n}', String(PREHEAT_LEARNED_AFTER_EPISODES))}`;
+      }
       if (learning.plateauTemp !== null) {
         text += ` ${t('status_plateau').replace('{temp}', learning.plateauTemp.toFixed(1))}`;
       }

@@ -33,9 +33,11 @@ import { createWindowState } from './windowDetector.mjs';
 
 const PRESETS: readonly string[] = ['frost', 'eco', 'comfort', 'boost', 'none', 'activity'];
 const WINDOW_PHASES: readonly string[] = ['closed', 'pending_open', 'open', 'pending_close'];
-const REJECT_REASONS: readonly string[] = [
-  'interrupted', 'sensor', 'demand', 'too_long', 'too_small', 'rate', 'coarse',
-];
+// Un `Record` sur l'union, et non une liste : un motif ajouté au type sans être ajouté ici ne compile
+// pas, au lieu d'être relu `null` après chaque redémarrage.
+const REJECT_REASONS: Record<EpisodeRejectReason, true> = {
+  interrupted: true, sensor: true, demand: true, too_long: true, too_small: true, rate: true, coarse: true,
+};
 
 // --- Validateurs élémentaires ----------------------------------------------
 //
@@ -211,7 +213,7 @@ function parsePreheatLearning(value: unknown): PreheatLearning {
       ? deadTime : defaults.deadTimeMin,
     accepted: count(value.accepted),
     rejected: count(value.rejected),
-    lastRejectReason: typeof reason === 'string' && REJECT_REASONS.includes(reason)
+    lastRejectReason: typeof reason === 'string' && Object.hasOwn(REJECT_REASONS, reason)
       ? reason as EpisodeRejectReason : null,
     plateauTemp: finiteOrNull(value.plateauTemp),
     history,

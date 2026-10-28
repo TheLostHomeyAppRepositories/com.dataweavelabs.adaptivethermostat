@@ -2216,9 +2216,30 @@
                 "nl": "Twee verschillende dingen"
               },
               "hint": {
-                "en": "Presence is about the home: nobody there, every preset falls back to its away temperature. Motion is about this room only, and drives the Activity preset — which is offered only once all four settings below are filled in.",
-                "fr": "La présence concerne le logement : personne, et chaque preset se rabat sur sa température d'absence. Le mouvement ne concerne que cette pièce, et pilote le preset Activité — qui n'est proposé qu'une fois les quatre réglages ci-dessous renseignés.",
-                "nl": "Aanwezigheid gaat over het huis: is er niemand, dan valt elk preset terug op zijn afwezigheidstemperatuur. Beweging gaat alleen over deze kamer en stuurt het Activiteit-preset — dat pas verschijnt zodra de vier instellingen hieronder zijn ingevuld."
+                "en": "Presence is about the home: nobody there, every preset falls back to its away temperature. Best source: \"Homey presence (geolocation)\". A motion sensor used for presence only reports the home empty after the delay below without detection. Motion is about this room only, and drives the Activity preset — which is offered only once the motion settings below are filled in.",
+                "fr": "La présence concerne le logement : personne, et chaque preset se rabat sur sa température d'absence. Meilleure source : « Présence de Homey (géolocalisation) ». Un détecteur de mouvement utilisé pour la présence ne déclare le logement vide qu'après le délai ci-dessous sans détection. Le mouvement ne concerne que cette pièce, et pilote le preset Activité — qui n'est proposé qu'une fois les réglages de mouvement ci-dessous renseignés.",
+                "nl": "Aanwezigheid gaat over het huis: is er niemand, dan valt elk preset terug op zijn afwezigheidstemperatuur. Beste bron: \"Homey-aanwezigheid (geolocatie)\". Een bewegingssensor die voor aanwezigheid wordt gebruikt, meldt het huis pas leeg na de vertraging hieronder zonder detectie. Beweging gaat alleen over deze kamer en stuurt het Activiteit-preset — dat pas verschijnt zodra de bewegingsinstellingen hieronder zijn ingevuld."
+              }
+            },
+            {
+              "id": "presence_off_delay",
+              "type": "number",
+              "value": 60,
+              "min": 0,
+              "max": 720,
+              "step": 5,
+              "units": {
+                "en": "min"
+              },
+              "label": {
+                "en": "Delay before away",
+                "fr": "Délai avant absence",
+                "nl": "Vertraging vóór afwezig"
+              },
+              "hint": {
+                "en": "How long the home must stay quiet before it counts as empty. With a sensor: time since it last saw someone. With Homey presence: time since any motion or presence sensor of any thermostat last saw someone, once nobody is geolocated at home — the nanny staying with the children keeps the heating on. Not applied to presence forced by a Flow.",
+                "fr": "Combien de temps le logement doit rester calme avant de compter comme vide. Avec un capteur : depuis sa dernière détection. Avec la présence de Homey : une fois personne géolocalisé à la maison, depuis la dernière détection d'un détecteur de mouvement ou de présence de n'importe quel thermostat — la nounou restée avec les enfants garde le chauffage. Ne s'applique pas à une présence forcée par Flow.",
+                "nl": "Hoelang het huis rustig moet blijven voordat het als leeg geldt. Met een sensor: sinds de laatste detectie. Met Homey-aanwezigheid: zodra niemand thuis gegeolokaliseerd is, sinds de laatste detectie van een bewegings- of aanwezigheidssensor van eender welke thermostaat — de oppas die bij de kinderen blijft, houdt de verwarming aan. Geldt niet voor door een Flow geforceerde aanwezigheid."
               }
             },
             {

@@ -1,0 +1,77 @@
+/**
+ * Présence du logement : lecture de `users.getUsers()` et délai avant absence.
+ *
+ * PANNES EMPÊCHÉES : un radar choisi comme source de présence qui vide le logement dès que personne
+ * ne bouge, un logement déclaré vide sur une réponse sans utilisateur, et une absence de vacances
+ * qui deviendrait périmée — donc « présente » — au bout du seuil de fraîcheur.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  holdAbsence, isPresenceMisused, parseUsersPresence, PRESENCE_SOURCE_ID,
+} from '../lib/presence.mjs';
+
+const MIN = 60_000;
+const NOW = Date.parse('2026-10-28T14:00:00Z');
+
+test('un seul utilisateur à la maison suffit', () => {
+  const users = {
+    a: { name: 'Vincent', enabled: true, present: false },
+    b: { name: 'Solène', enabled: true, present: true },
+  };
+  assert.deepEqual(parseUsersPresence(users, NOW), { value: true, atMs: NOW });
+});
+
+test('tout le monde parti : absent, daté à la requête', () => {
+  const users = [{ enabled: true, present: false }, { enabled: true, present: false }];
+  assert.deepEqual(parseUsersPresence(users, NOW), { value: false, atMs: NOW });
+});
+
+test('un utilisateur désactivé ne compte pas', () => {
+  assert.deepEqual(
+    parseUsersPresence({ a: { enabled: false, present: true }, b: { enabled: true, present: false } }, NOW),
+    { value: false, atMs: NOW },
+  );
+});
+
+test('une réponse sans présence exploitable ne vide pas le logement', () => {
+  assert.equal(parseUsersPresence(null, NOW), null);
+  assert.equal(parseUsersPresence({}, NOW), null);
+  assert.equal(parseUsersPresence({ a: { name: 'x' } }, NOW), null);
+  assert.equal(parseUsersPresence({ a: { present: null } }, NOW), null);
+  assert.equal(parseUsersPresence({ a: { enabled: false, present: false } }, NOW), null);
+});
+
+test('la présence de Homey ne sert qu\'à la présence', () => {
+  assert.equal(isPresenceMisused('presence', PRESENCE_SOURCE_ID), false);
+  assert.equal(isPresenceMisused('motion', PRESENCE_SOURCE_ID), true);
+  assert.equal(isPresenceMisused('room', PRESENCE_SOURCE_ID), true);
+  assert.equal(isPresenceMisused('motion', 'uuid-radar'), false);
+  assert.equal(isPresenceMisused('presence', null), false);
+});
+
+test('un « absent » récent vaut encore présent, et annonce sa bascule', () => {
+  const reading = { value: false, atMs: NOW - 10 * MIN, stale: false };
+  const held = holdAbsence(reading, NOW, 60 * MIN);
+  assert.deepEqual(held.reading, { value: true, atMs: NOW - 10 * MIN, stale: false });
+  assert.equal(held.wakeUpAtMs, NOW + 50 * MIN);
+});
+
+test('passé le délai, l\'absence s\'applique', () => {
+  const reading = { value: false, atMs: NOW - 60 * MIN, stale: false };
+  assert.deepEqual(holdAbsence(reading, NOW, 60 * MIN), { reading, wakeUpAtMs: null });
+});
+
+test('délai nul : le comportement d\'avant', () => {
+  const reading = { value: false, atMs: NOW - 1_000, stale: false };
+  assert.deepEqual(holdAbsence(reading, NOW, 0), { reading, wakeUpAtMs: null });
+});
+
+test('présent, périmé ou sans lecture : rien à retenir', () => {
+  const present = { value: true, atMs: NOW - MIN, stale: false };
+  const stale = { value: false, atMs: NOW - MIN, stale: true };
+  assert.deepEqual(holdAbsence(present, NOW, 60 * MIN), { reading: present, wakeUpAtMs: null });
+  assert.deepEqual(holdAbsence(stale, NOW, 60 * MIN), { reading: stale, wakeUpAtMs: null });
+  assert.deepEqual(holdAbsence(null, NOW, 60 * MIN), { reading: null, wakeUpAtMs: null });
+});

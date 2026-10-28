@@ -204,6 +204,33 @@ export default class VThermApp extends Homey.App {
     this.schedulerImpl?.requestTick(reason);
   }
 
+  /**
+   * Dernière activité vue dans le logement, tous thermostats confondus. Alimente la présence de
+   * Homey : personne de géolocalisé ne veut pas dire maison vide.
+   */
+  houseActivityAtMs(nowMs: number): number | null {
+    let latest: number | null = null;
+    for (const participant of this.vtherms.values()) {
+      const atMs = participant.lastActivityAtMs(nowMs);
+      if (atMs !== null && (latest === null || atMs > latest)) latest = atMs;
+    }
+    return latest;
+  }
+
+  /**
+   * Un détecteur a changé d'état. Son thermostat tique de toute façon ; ceux qui suivent la présence
+   * de Homey doivent aussi le voir — un mouvement dans la chambre des enfants ramène la présence
+   * au salon. Raison GLOBALE, donc tout le monde tique, mais seulement si quelqu'un en dépend.
+   */
+  noteActivity(): void {
+    for (const participant of this.vtherms.values()) {
+      if (participant.followsHouseActivity) {
+        this.schedulerImpl?.requestTick('house-activity');
+        return;
+      }
+    }
+  }
+
   // --- Dorsale MQTT ----------------------------------------------------------
 
   get valveBackend(): ValveBackend | null {

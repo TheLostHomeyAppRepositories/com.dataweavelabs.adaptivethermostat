@@ -550,6 +550,126 @@ test('logement vide depuis une nuit : la présence virtuelle muette reste « abs
   );
 });
 
+// --- Délai avant absence ------------------------------------------------------
+
+test('un radar immobile depuis dix minutes ne vide pas le logement, et le réveil tombe à l\'échéance', async () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  // Le radar sert de présence : il retombe à faux dès que personne ne bouge.
+  const presence = new FakeBinding(false, nowMs - 10 * MIN);
+  const { host, room, participant } = world('valve', { presence });
+
+  room.setReading(19, nowMs);
+  await participant.tick(nowMs);
+
+  assert.equal(host.getCapabilityValue('vtherm_presence'), true, 'un salon calme n\'est pas un logement vide');
+  assert.equal(participant.isSomeoneHome(nowMs), true, 'la condition Flow dit la même chose que la régulation');
+  assert.ok(
+    participant.dueAtMs() <= nowMs + 50 * MIN,
+    'sans réveil, l\'absence n\'arriverait qu\'au cycle suivant, après l\'échéance',
+  );
+
+  await participant.tick(nowMs + 50 * MIN);
+  assert.equal(host.getCapabilityValue('vtherm_presence'), false, 'au bout d\'une heure sans détection, l\'absence s\'applique');
+  assert.equal(participant.isSomeoneHome(nowMs + 50 * MIN), false);
+});
+
+test('la présence de Homey déclare l\'absence sans délai', async () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  const presence = new FakeBinding(false, nowMs - MIN);
+  presence.confirmedAbsence = true;
+  const { host, room, participant } = world('valve', { presence });
+
+  room.setReading(19, nowMs);
+  await participant.tick(nowMs);
+
+  assert.equal(host.getCapabilityValue('vtherm_presence'), false, 'la géolocalisation est déjà une absence confirmée');
+});
+
+test('personne de géolocalisé mais la nounou bouge dans la chambre : pas d\'absence', async () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  const presence = new FakeBinding(false, nowMs);
+  presence.confirmedAbsence = true;
+  const host = new FakeDeviceHost('salon');
+  const room = new FakeBinding(19, nowMs);
+  let activityAtMs: number | null = nowMs - 20 * MIN;
+  const participant = new VThermParticipant({
+    host,
+    emitter: new FakeEmitter('emetteur-salon'),
+    sources: { ...noSources(room), presence },
+    config: CONFIG,
+    syncMode: 'off',
+    controlsBoiler: true,
+    centralMode: () => 'auto',
+    requestTick: () => undefined,
+    defaults: DEFAULTS,
+    nowMs: 0,
+    houseActivityAtMs: () => activityAtMs,
+  });
+
+  await participant.tick(nowMs);
+  assert.equal(host.getCapabilityValue('vtherm_presence'), true, 'les parents partis, la maison n\'est pas vide');
+  assert.equal(participant.followsHouseActivity, true);
+  assert.ok(participant.dueAtMs() <= nowMs + 40 * MIN, 'réveil quand la maison sera calme depuis le délai');
+
+  await participant.tick(nowMs + 40 * MIN);
+  assert.equal(host.getCapabilityValue('vtherm_presence'), false, 'une heure de calme : l\'absence s\'applique');
+
+  // La nounou revient dans le salon : la présence revient sans attendre les parents.
+  activityAtMs = nowMs + 41 * MIN;
+  await participant.tick(nowMs + 41 * MIN);
+  assert.equal(host.getCapabilityValue('vtherm_presence'), true);
+
+  // Sans aucun détecteur dans la maison, la géolocalisation décide seule.
+  activityAtMs = null;
+  await participant.tick(nowMs + 42 * MIN);
+  assert.equal(host.getCapabilityValue('vtherm_presence'), false);
+});
+
+test('l\'activité d\'un thermostat : maintenant si son détecteur voit, sinon l\'instant où il est retombé', () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  const motion = new FakeBinding(false, nowMs - 5 * MIN);
+  const { participant } = world('valve', { motion });
+  assert.equal(participant.lastActivityAtMs(nowMs), nowMs - 5 * MIN);
+  motion.setReading(true, nowMs - MIN);
+  assert.equal(participant.lastActivityAtMs(nowMs), nowMs);
+
+  const homey = new FakeBinding(true, nowMs);
+  homey.confirmedAbsence = true;
+  const { participant: other } = world('valve', { presence: homey });
+  assert.equal(other.lastActivityAtMs(nowMs), null, 'la géolocalisation n\'est pas une activité dans la maison');
+});
+
+test('un délai de zéro rend le comportement d\'avant', async () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  const presence = new FakeBinding(false, nowMs - MIN);
+  const { host, room, participant } = world('valve', { presence });
+  participant.updateConfig({ ...CONFIG, presenceOffDelayMin: 0 });
+
+  room.setReading(19, nowMs);
+  await participant.tick(nowMs);
+
+  assert.equal(host.getCapabilityValue('vtherm_presence'), false);
+});
+
+test('le forçage par Flow ne subit pas le délai', async () => {
+  const MIN = 60_000;
+  const nowMs = 3 * 60 * MIN;
+  const presence = new FakeBinding(true, nowMs - MIN);
+  const { host, room, participant } = world('valve', { presence });
+  participant.forcePresence('away');
+
+  room.setReading(19, nowMs);
+  await participant.tick(nowMs);
+
+  assert.equal(host.getCapabilityValue('vtherm_presence'), false);
+  assert.equal(participant.isSomeoneHome(nowMs), false);
+});
+
 test('le seuil de la pile est le plus large de la table, celui de la pièce le plus strict', () => {
   const regulation = [
     FRESHNESS.roomTempMs, FRESHNESS.outdoorTempMs, FRESHNESS.emitterHeatingMs,

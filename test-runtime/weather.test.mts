@@ -134,3 +134,26 @@ test('une requête qui ne répond jamais est abandonnée au délai, et la suivan
   assert.equal(weather.reading?.value, 4);
   binding.destroy();
 });
+
+test('une lecture datée à la requête ne prévient les abonnés que si sa valeur change', async () => {
+  const { PolledFeed } = await import('../runtime/polledFeed.mjs');
+  const values = [true, true, false];
+  let calls = 0;
+  const presence = new PolledFeed<boolean>({
+    fetch: async () => values[Math.min(calls++, values.length - 1)],
+    parse: (raw, fetchedAtMs) => (typeof raw === 'boolean' ? { value: raw, atMs: fetchedAtMs } : null),
+    label: 'Présence',
+    pollMs: MIN,
+    retryMs: MIN,
+    timeoutMs: 1_000,
+    notifyOnValueChangeOnly: true,
+  });
+  const seen: boolean[] = [];
+  const binding = presence.bind((reading) => seen.push(reading.value as boolean));
+  const t0 = Date.now();
+  await presence.maybeFetch(t0);
+  await presence.maybeFetch(t0 + MIN);
+  await presence.maybeFetch(t0 + 2 * MIN);
+  assert.deepEqual(seen, [true, false], 'la deuxième lecture, identique, ne réveille personne');
+  binding.destroy();
+});

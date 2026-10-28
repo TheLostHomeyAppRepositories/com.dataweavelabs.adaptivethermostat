@@ -23,6 +23,7 @@ import {
 } from '../lib/constants.mjs';
 import { createBoilerState, ignitionAllowedAtMs, stepBoiler } from '../lib/boilerAggregator.mjs';
 import { addPreheatTarget, targetsAfterManualChange } from '../lib/preheat.mjs';
+import { DEFAULT_PRESENCE_OFF_DELAY_MIN, holdAbsence } from '../lib/presence.mjs';
 import { restoreVThermState } from '../lib/state.mjs';
 import { stepVTherm } from '../lib/step.mjs';
 import type { CapValue, SourceBinding } from './hub.mjs';
@@ -209,6 +210,12 @@ export interface VThermParticipantOptions {
    * à chaud. Absent = jamais.
    */
   roomSensorIsEmitter?: () => boolean;
+  /**
+   * Dernière activité vue dans le LOGEMENT par les détecteurs de tous les thermostats (instant, ou
+   * `null` si aucun n'a rien vu). Retient l'absence de la présence de Homey : la géolocalisation ne
+   * voit ni la nounou ni les enfants. Absent = aucune activité connue.
+   */
+  houseActivityAtMs?: (nowMs: number) => number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +280,7 @@ export class VThermParticipant implements Tickable {
   private readonly centralMode: () => CentralMode;
   private readonly requestTick: (reason: string) => void;
   private readonly roomSensorIsEmitter: () => boolean;
+  private readonly houseActivityAtMs: (nowMs: number) => number | null;
 
   private config: VThermConfig;
   private syncMode: SyncMode;
@@ -282,6 +290,8 @@ export class VThermParticipant implements Tickable {
 
   private demandValue: Demand = { kind: 'unknown' };
   private wakeUpAt: number | null = null;
+  /** Échéance du délai avant absence : l'instant où un capteur muet basculera en « absent ». */
+  private presenceWakeUpAt: number | null = null;
   private lastTickAtMs: number | null = null;
 
   private lastPersistAtMs: number;
@@ -331,6 +341,7 @@ export class VThermParticipant implements Tickable {
     this.centralMode = options.centralMode;
     this.requestTick = options.requestTick;
     this.roomSensorIsEmitter = options.roomSensorIsEmitter ?? (() => false);
+    this.houseActivityAtMs = options.houseActivityAtMs ?? (() => null);
     this.config = options.config;
     this.syncMode = options.syncMode;
     this.controlsBoilerFlag = options.controlsBoiler;
@@ -433,7 +444,9 @@ export class VThermParticipant implements Tickable {
 
     const { outputs, nextState } = stepVTherm(this.state, inputs, this.config, nowMs);
     this.state = nextState;
-    this.wakeUpAt = outputs.wakeUpAtMs;
+    this.wakeUpAt = this.presenceWakeUpAt === null || outputs.wakeUpAtMs === null
+      ? outputs.wakeUpAtMs ?? this.presenceWakeUpAt
+      : Math.min(outputs.wakeUpAtMs, this.presenceWakeUpAt);
 
     const target = outputs.capabilities.target_temperature;
     if (typeof target === 'number') this.userSetpoint = target;
@@ -458,7 +471,7 @@ export class VThermParticipant implements Tickable {
       outdoorTemp: readNumber(this.sources.outdoor, nowMs, FRESHNESS.outdoorTempMs),
       windowContact: readBoolean(this.sources.windowContact, nowMs, FRESHNESS.windowContactMs),
       motion: readBoolean(this.sources.motion, nowMs, FRESHNESS.motionMs),
-      presence: this.resolvePresence(nowMs),
+      presence: this.resolvePresenceForTick(nowMs),
       emitterHeating: this.emitter.readHeating(nowMs),
       // Joignable ET pourvu d'une consigne : c'est la preuve que la détection a eu lieu. Avant
       // elle, toutes les capabilities valent faux, et l'absence d'état de chauffe ne prouve rien.
@@ -476,12 +489,67 @@ export class VThermParticipant implements Tickable {
     };
   }
 
-  /** Le forçage Flow prime sur le capteur, et n'est jamais périmé : c'est une décision explicite. */
-  private resolvePresence(nowMs: number): Reading<boolean> | null {
+  /**
+   * Le forçage Flow prime sur le capteur, et n'est jamais périmé : c'est une décision explicite.
+   * Un capteur ne déclare l'absence qu'après le délai avant absence ; la présence de Homey, elle,
+   * est déjà confirmée et passe sans délai.
+   */
+  private resolvePresence(nowMs: number): { reading: Reading<boolean> | null; wakeUpAtMs: number | null } {
     if (this.presenceOverride !== 'auto') {
-      return { value: this.presenceOverride === 'home', atMs: nowMs, stale: false };
+      return { reading: { value: this.presenceOverride === 'home', atMs: nowMs, stale: false }, wakeUpAtMs: null };
     }
-    return readBoolean(this.sources.presence, nowMs, FRESHNESS.presenceMs);
+    const binding = this.sources.presence;
+    const reading = readBoolean(binding, nowMs, FRESHNESS.presenceMs);
+    const delayMs = (this.config.presenceOffDelayMin ?? DEFAULT_PRESENCE_OFF_DELAY_MIN) * MS_PER_MINUTE;
+    if (binding?.confirmedAbsence !== true) return holdAbsence(reading, nowMs, delayMs);
+
+    // Présence de Homey : personne n'est géolocalisé, mais un détecteur de la maison a vu quelqu'un
+    // il y a moins que le délai — la nounou est restée avec les enfants. L'absence attend que la
+    // maison soit calme depuis le délai entier.
+    if (reading === null || reading.value || reading.stale) return { reading, wakeUpAtMs: null };
+    const activityAtMs = this.houseActivityAtMs(nowMs);
+    if (activityAtMs === null) return { reading, wakeUpAtMs: null };
+    const held = holdAbsence({ ...reading, atMs: activityAtMs }, nowMs, delayMs);
+    return held.wakeUpAtMs === null ? { reading, wakeUpAtMs: null } : held;
+  }
+
+  /**
+   * Dernière activité que les détecteurs DE CE thermostat ont vue : maintenant s'ils voient
+   * quelqu'un, sinon l'instant où ils sont retombés. Le détecteur de présence ne compte que s'il
+   * est un vrai capteur — la présence de Homey n'est pas une activité dans la maison.
+   */
+  lastActivityAtMs(nowMs: number): number | null {
+    let latest: number | null = null;
+    const consider = (binding: SourceBinding | null, freshnessMs: number): void => {
+      if (binding === null || binding.confirmedAbsence === true) return;
+      const reading = readBoolean(binding, nowMs, freshnessMs);
+      if (reading === null || reading.stale) return;
+      const atMs = reading.value ? nowMs : reading.atMs;
+      if (latest === null || atMs > latest) latest = atMs;
+    };
+    consider(this.sources.motion, FRESHNESS.motionMs);
+    consider(this.sources.presence, FRESHNESS.presenceMs);
+    return latest;
+  }
+
+  /** Ce thermostat suit-il la présence de Homey, donc l'activité de toute la maison ? */
+  get followsHouseActivity(): boolean {
+    return this.presenceOverride === 'auto' && this.sources.presence?.confirmedAbsence === true;
+  }
+
+  private resolvePresenceForTick(nowMs: number): Reading<boolean> | null {
+    const { reading, wakeUpAtMs } = this.resolvePresence(nowMs);
+    this.presenceWakeUpAt = wakeUpAtMs;
+    return reading;
+  }
+
+  /**
+   * La présence telle que la régulation l'applique : forçage, délai avant absence compris. Une
+   * lecture absente ou périmée ne déclare personne absent.
+   */
+  isSomeoneHome(nowMs: number): boolean {
+    const { reading } = this.resolvePresence(nowMs);
+    return reading === null || reading.stale || reading.value;
   }
 
   // --- Application des sorties ----------------------------------------------

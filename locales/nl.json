@@ -179,5 +179,8 @@
   },
   "weather": {
     "source_name": "Homey-weer (internet)"
+  },
+  "presence": {
+    "source_name": "Homey-aanwezigheid (geolocatie)"
   }
 }

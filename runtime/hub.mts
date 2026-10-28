@@ -16,6 +16,10 @@ import { HomeyAPI } from 'homey-api';
 import { matchesCapability } from '../lib/capabilityMatch.mjs';
 import { WEATHER_SOURCE_ID } from '../lib/weather.mjs';
 import { WeatherFeed } from './weather.mjs';
+import {
+  parseUsersPresence, PRESENCE_FETCH_TIMEOUT_MS, PRESENCE_POLL_MS, PRESENCE_RETRY_MS, PRESENCE_SOURCE_ID,
+} from '../lib/presence.mjs';
+import { PolledFeed } from './polledFeed.mjs';
 
 import { computeStale, deviceReportedAtMs, resolveTimestamp, toEpochMs } from '../lib/freshness.mjs';
 import { shouldWrite } from '../lib/writePolicy.mjs';
@@ -122,6 +126,8 @@ interface HomeyApiClient {
   zones: ApiManagerZones;
   /** Météo de l'emplacement du Homey. Absente d'une API trop ancienne : voir `WeatherFeed`. */
   weather?: { getWeather(): Promise<unknown> };
+  /** Utilisateurs du Homey, avec leur présence géolocalisée. */
+  users?: { getUsers(opts?: { $cache?: boolean }): Promise<unknown> };
   on(event: string, fn: (...args: unknown[]) => void): unknown;
   destroy(): void;
 }
@@ -194,6 +200,11 @@ export interface SourceBinding {
    */
   write(value: CapValue, opts: WriteRequest): Promise<boolean>;
   destroy(): void;
+  /**
+   * Vrai quand un `false` lu ici est une absence CONFIRMÉE, à appliquer sans délai — la présence de
+   * Homey. Absent ou faux : un capteur, dont l'immobilité ne prouve pas que le logement est vide.
+   */
+  readonly confirmedAbsence?: boolean;
 }
 
 // --- Implémentation --------------------------------------------------------
@@ -448,6 +459,9 @@ export class HomeyApiHub {
   /** La météo de Homey, servie aux thermostats qui la désignent comme source extérieure. */
   readonly weather: WeatherFeed;
 
+  /** La présence de Homey (géolocalisation), servie aux thermostats qui la désignent. */
+  readonly presence: PolledFeed<boolean>;
+
   constructor(private readonly homey: HomeyInstance, options: HomeyApiHubOptions = {}) {
     this.events.setMaxListeners(0);
     this.log = options.log ?? (() => undefined);
@@ -458,6 +472,22 @@ export class HomeyApiHub {
         if (weather === undefined) throw new Error('API météo indisponible');
         return weather.getWeather();
       },
+      error: (...args) => this.logError(...args),
+    });
+    this.presence = new PolledFeed<boolean>({
+      fetch: async () => {
+        const users = this.api?.users;
+        if (users === undefined) throw new Error('API utilisateurs indisponible');
+        // Sans `$cache: false`, la bibliothèque rendrait la présence de la première lecture.
+        return users.getUsers({ $cache: false });
+      },
+      parse: parseUsersPresence,
+      label: 'Présence de Homey',
+      pollMs: PRESENCE_POLL_MS,
+      retryMs: PRESENCE_RETRY_MS,
+      timeoutMs: PRESENCE_FETCH_TIMEOUT_MS,
+      confirmedAbsence: true,
+      notifyOnValueChangeOnly: true,
       error: (...args) => this.logError(...args),
     });
   }
@@ -612,6 +642,7 @@ export class HomeyApiHub {
     this.events.emit('connected');
     // La première requête météo est souvent partie avant l'API : on la relance dès qu'elle est là.
     void this.weather.maybeFetch(Date.now());
+    void this.presence.maybeFetch(Date.now());
   }
 
   /** Ré-abonne toutes les liaisons. Rejoué après chaque reconnexion : les `Device` du cache ont pu être remplacés. */
@@ -637,6 +668,7 @@ export class HomeyApiHub {
   ): SourceBinding {
     // La météo n'est pas un appareil : elle a sa propre liaison, au même contrat.
     if (deviceId === WEATHER_SOURCE_ID) return this.weather.bind(onChange);
+    if (deviceId === PRESENCE_SOURCE_ID) return this.presence.bind(onChange);
 
     const binding = new Binding(this, deviceId, capabilityId, onChange);
     this.bindings.add(binding);
@@ -671,6 +703,7 @@ export class HomeyApiHub {
     if (this.stopped) return;
     // Avant le plancher des appareils : la météo a le sien, et ne dépend pas du websocket.
     void this.weather.maybeFetch(nowMs);
+    void this.presence.maybeFetch(nowMs);
     if (!this.connected) return;
     if (this.refreshInFlight !== null) return;
     if (nowMs - this.lastRefreshAtMs < REFRESH_MIN_INTERVAL_MS) return;
@@ -725,6 +758,7 @@ export class HomeyApiHub {
     // Un résumé synthétique : le nom affiché dans les réglages et la page de sources, et la
     // capability que la liaison extérieure cherche, sans cas particulier chez les appelants.
     if (deviceId === WEATHER_SOURCE_ID) return this.weatherSummary();
+    if (deviceId === PRESENCE_SOURCE_ID) return this.presenceSummary();
 
     const api = this.api;
     if (api === null) return null;
@@ -756,6 +790,21 @@ export class HomeyApiHub {
       available: !this.weather.unavailable,
       driverUri: null,
       reportedAtMs: this.weather.reading?.atMs ?? null,
+    };
+  }
+
+  /** La présence de Homey, présentée comme un capteur de présence sans pièce. */
+  presenceSummary(): DeviceSummary {
+    return {
+      id: PRESENCE_SOURCE_ID,
+      name: this.homey.__('presence.source_name'),
+      zoneName: null,
+      class: 'sensor',
+      capabilities: ['alarm_presence'],
+      setable: {},
+      available: !this.presence.unavailable,
+      driverUri: null,
+      reportedAtMs: this.presence.reading?.atMs ?? null,
     };
   }
 
@@ -832,6 +881,7 @@ export class HomeyApiHub {
     }
     this.bindings.clear();
     this.weather.stop();
+    this.presence.stop();
 
     const api = this.api;
     this.api = null;

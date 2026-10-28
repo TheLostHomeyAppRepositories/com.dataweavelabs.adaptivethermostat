@@ -36,6 +36,8 @@ export class FakeBinding implements SourceBinding {
    */
   readonly attempts: FakeWrite[] = [];
   destroyed = false;
+  /** Voir `SourceBinding.confirmedAbsence` : vrai pour simuler la présence de Homey. */
+  confirmedAbsence?: boolean;
 
   /** Prochaines écritures : `true` = part, `false` = dédupliquée, `Error` = échoue. */
   private outcome: true | false | Error = true;

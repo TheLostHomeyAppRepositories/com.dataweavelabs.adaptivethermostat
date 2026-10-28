@@ -7,6 +7,6 @@ verwarmt, en de rest gaat vanzelf.
 
 De app werkt met elke temperatuursensor en elke verwarming die al aan uw Homey gekoppeld is,
 uit welke app die ook komt, en wordt beter met elk optioneel apparaat dat u eraan toevoegt:
-een raamcontact, een bewegings- of aanwezigheidssensor, een buitenthermometer, een relais dat
+een raamcontact, een bewegings- of aanwezigheidssensor, een buitenthermometer (of het weer van Homey), een relais dat
 uw ketel start. Homey Pro is vereist, omdat het uitlezen en aansturen van apparaten die bij
 andere apps horen een permissie vraagt die Homey Cloud niet biedt.

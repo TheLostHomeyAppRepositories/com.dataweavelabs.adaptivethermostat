@@ -81,6 +81,7 @@ export default class VThermApp extends Homey.App {
   private schedulerImpl: Scheduler | null = null;
 
   private readonly vtherms = new Map<string, VThermParticipant>();
+  private houseActivityMemo: { nowMs: number; atMs: number | null } | null = null;
   private central: CentralParticipant | null = null;
   private valveBackendImpl: ValveBackend | null = null;
   /** Dernière disponibilité connue de la dorsale : on n'agit que sur les TRANSITIONS. */
@@ -160,12 +161,14 @@ export default class VThermApp extends Homey.App {
   // --- Registre --------------------------------------------------------------
 
   registerVTherm(participant: VThermParticipant): void {
+    this.houseActivityMemo = null;
     this.vtherms.set(participant.tickId, participant);
     participant.setValveBackend(this.valveBackendImpl);
     this.schedulerImpl?.requestTick(`register:${participant.tickId}`);
   }
 
   unregisterVTherm(id: string): void {
+    this.houseActivityMemo = null;
     if (!this.vtherms.delete(id)) return;
     this.schedulerImpl?.requestTick(`unregister:${id}`);
   }
@@ -209,24 +212,30 @@ export default class VThermApp extends Homey.App {
    * Homey : personne de géolocalisé ne veut pas dire maison vide.
    */
   houseActivityAtMs(nowMs: number): number | null {
+    // Une fois par instant : chaque thermostat suiveur la demande au même pas du cycle, et la
+    // recalculer pour chacun parcourrait tous les détecteurs autant de fois.
+    if (this.houseActivityMemo?.nowMs === nowMs) return this.houseActivityMemo.atMs;
     let latest: number | null = null;
     for (const participant of this.vtherms.values()) {
       const atMs = participant.lastActivityAtMs(nowMs);
       if (atMs !== null && (latest === null || atMs > latest)) latest = atMs;
     }
+    this.houseActivityMemo = { nowMs, atMs: latest };
     return latest;
   }
 
   /**
    * Un détecteur a changé d'état. Son thermostat tique de toute façon ; ceux qui suivent la présence
    * de Homey doivent aussi le voir — un mouvement dans la chambre des enfants ramène la présence
-   * au salon. Raison GLOBALE, donc tout le monde tique, mais seulement si quelqu'un en dépend.
+   * au salon. Raison NOMMÉE pour chacun d'eux seulement : une raison globale ferait recalculer tout
+   * le logement à chaque mouvement, la charge que `targetsFor` existe pour éviter.
    */
   noteActivity(): void {
+    // Un détecteur vient de changer : ce qu'on avait calculé à cet instant ne vaut plus.
+    this.houseActivityMemo = null;
     for (const participant of this.vtherms.values()) {
       if (participant.followsHouseActivity) {
-        this.schedulerImpl?.requestTick('house-activity');
-        return;
+        this.schedulerImpl?.requestTick(`${participant.tickId}:house-activity`);
       }
     }
   }

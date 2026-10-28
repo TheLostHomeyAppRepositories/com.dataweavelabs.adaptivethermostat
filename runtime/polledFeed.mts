@@ -29,6 +29,14 @@ export interface PolledFeedOptions<V extends CapValue> {
   parse: (raw: unknown, fetchedAtMs: number) => PolledReading<V> | null;
   /** Nom de la source dans les journaux, par exemple « Météo de Homey ». */
   label: string;
+  /** Ce qui manque à une réponse que `parse` rejette, pour le journal. */
+  invalidMessage: string;
+  /**
+   * L'API est-elle montée ? Tant qu'elle ne l'est pas, aucune requête ne part et l'intervalle n'est
+   * pas consommé : la liaison faite au démarrage, avant l'API, ne doit ni journaliser une erreur à
+   * chaque redémarrage ni faire ignorer la relance que le hub tente à sa connexion.
+   */
+  isReady: () => boolean;
   /** Intervalle entre deux interrogations réussies. */
   pollMs: number;
   /** Nouvelle tentative après un échec, plus tôt que `pollMs`. */
@@ -95,6 +103,7 @@ export class PolledFeed<V extends CapValue> {
   async maybeFetch(nowMs: number): Promise<void> {
     if (this.subscribers.size === 0) return;
     if (this.inFlight !== null) return this.inFlight;
+    if (!this.options.isReady()) return;
     if (nowMs - this.lastFetchAtMs < this.pollMs) return;
 
     this.lastFetchAtMs = nowMs;
@@ -113,7 +122,7 @@ export class PolledFeed<V extends CapValue> {
         ]);
         const reading = this.options.parse(raw, nowMs);
         if (reading === null) {
-          this.options.error?.(`${this.options.label} : réponse inexploitable.`);
+          this.options.error?.(`${this.options.label} : ${this.options.invalidMessage}`);
           retryAfterFailure();
           return;
         }

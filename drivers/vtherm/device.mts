@@ -33,13 +33,15 @@ import type {
 import { formatLocalHhMm, nextOccurrenceMs } from '../../lib/localTime.mjs';
 import { fitOutdoorRateModel, predictRate } from '../../lib/preheat.mjs';
 import { isWeatherMisused } from '../../lib/weather.mjs';
-import { DEFAULT_PRESENCE_OFF_DELAY_MIN, isPresenceMisused } from '../../lib/presence.mjs';
+import {
+  DEFAULT_PRESENCE_OFF_DELAY_MIN, isMotionOnlyCapability, isPresenceMisused, PRESENCE_SOURCE_ID,
+} from '../../lib/presence.mjs';
 import { windowModeForContact } from '../../lib/windowDetector.mjs';
 import type { CapValue } from '../../runtime/hub.mjs';
 import { HomeyEmitterAdapter, type EmitterAdapter } from '../../runtime/emitter.mjs';
 import { MultiEmitterAdapter } from '../../runtime/multiEmitter.mjs';
 import {
-  FRESHNESS, VThermParticipant,
+  FRESHNESS, readBoolean, VThermParticipant,
   type DeviceHost, type ParticipantEvent, type PresenceOverride, type VThermSourceBindings,
 } from '../../runtime/participants.mjs';
 import type VThermApp from '../../app.mjs';
@@ -392,8 +394,17 @@ export default class VThermDevice extends Homey.Device {
   isSomeoneHome(): boolean {
     if (this.participant !== null) return this.participant.isSomeoneHome(Date.now());
     if (this.presenceOverride !== 'auto') return this.presenceOverride === 'home';
-    // Pas encore de participant (démarrage) : rien ne régule encore, personne n'est déclaré absent.
-    return true;
+
+    // Pas encore de participant (démarrage). Un vrai capteur de présence se lit tel quel, comme le
+    // ferait le participant. Un détecteur de mouvement ou la présence de Homey demandent un délai
+    // ou l'activité de la maison, qu'on ne sait pas encore : « présent », comme toute lecture
+    // inconnue, plutôt qu'un « absent » que le participant démentirait quelques secondes après.
+    const binding = this.sources.presence;
+    if (binding === null || binding.confirmedAbsence === true || isMotionOnlyCapability(binding.capabilityId)) {
+      return true;
+    }
+    const reading = readBoolean(binding, Date.now(), FRESHNESS.presenceMs);
+    return reading === null || reading.stale || reading.value;
   }
 
   // --- Cartes Flow : actions --------------------------------------------------
@@ -853,16 +864,21 @@ export default class VThermDevice extends Homey.Device {
     // re-résolution à l'arrivée du hub passe directement par cette méthode, et remplacer la
     // référence sans détruire laisserait un abonnement websocket orphelin à vie. `destroy()` est
     // idempotent, donc le double appel du chemin normal ne coûte rien.
+    // La présence de Homey n'est pas une activité dans la maison : seuls les vrais détecteurs.
+    const isDetector = (key === 'motion' || key === 'presence') && deviceId !== PRESENCE_SOURCE_ID;
     this.sources[slot]?.destroy();
     this.sources[slot] = this.app.hub.bind(
       deviceId,
       resolved,
       () => {
         this.app.requestTick(`${this.deviceId()}:${key}`);
-        if (key === 'motion' || key === 'presence') this.app.noteActivity();
+        if (isDetector) this.app.noteActivity();
       },
     );
     this.app.requestTick(`${this.deviceId()}:${key}:bound`);
+    // Un détecteur qui se rattache apporte enfin sa vraie dernière activité : les thermostats qui
+    // suivent la présence de Homey doivent la voir, pas attendre leur échéance.
+    if (isDetector) this.app.noteActivity();
   }
 
   private sourceId(key: SourceKey): string | null {

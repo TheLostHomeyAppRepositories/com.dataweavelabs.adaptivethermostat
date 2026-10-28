@@ -281,3 +281,67 @@ test('tick demandé par UNE pièce : la chaudière compte encore celles qui n\'o
 
   await app.onUninit();
 });
+
+// --- Activité de la maison ------------------------------------------------------
+
+test('un mouvement ne réveille que les thermostats qui suivent la présence de Homey, chacun nommé', async () => {
+  const { app, participant } = await boot('valve');
+
+  const homeyPresence = new FakeBinding(false, Date.now());
+  homeyPresence.confirmedAbsence = true;
+  const follower = new VThermParticipant({
+    host: new FakeDeviceHost('chambre'),
+    emitter: new FakeEmitter('emetteur-chambre'),
+    sources: {
+      room: new FakeBinding(), outdoor: null, windowContact: null, motion: null, presence: homeyPresence,
+    },
+    config: CONFIG,
+    syncMode: 'off',
+    controlsBoiler: true,
+    centralMode: () => app.centralMode(),
+    requestTick: (reason) => app.requestTick(reason),
+    defaults: DEFAULTS,
+    nowMs: 0,
+  });
+  app.registerVTherm(follower);
+
+  const scheduler = (app as unknown as { schedulerImpl: { requestTick(reason: string): void } }).schedulerImpl;
+  const reasons: string[] = [];
+  const original = scheduler.requestTick.bind(scheduler);
+  scheduler.requestTick = (reason: string) => {
+    reasons.push(reason);
+    original(reason);
+  };
+
+  app.noteActivity();
+  assert.deepEqual(
+    reasons, [`${follower.tickId}:house-activity`],
+    `une raison globale ferait recalculer tout le logement à chaque mouvement ; ${participant.tickId} ne suit pas Homey`,
+  );
+
+  await app.onUninit();
+});
+
+test('l\'activité de la maison se calcule une fois par instant, pas une fois par thermostat suiveur', async () => {
+  const { app, participant } = await boot('valve');
+  let scans = 0;
+  const original = participant.lastActivityAtMs.bind(participant);
+  participant.lastActivityAtMs = (nowMs: number) => {
+    scans += 1;
+    return original(nowMs);
+  };
+
+  app.houseActivityAtMs(1_000);
+  app.houseActivityAtMs(1_000);
+  app.houseActivityAtMs(1_000);
+  assert.equal(scans, 1);
+  app.houseActivityAtMs(2_000);
+  assert.equal(scans, 2);
+
+  // Un détecteur qui change au même instant invalide ce qu'on avait calculé.
+  app.noteActivity();
+  app.houseActivityAtMs(2_000);
+  assert.equal(scans, 3);
+
+  await app.onUninit();
+});

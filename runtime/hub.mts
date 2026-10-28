@@ -205,6 +205,11 @@ export interface SourceBinding {
    * Homey. Absent ou faux : un capteur, dont l'immobilité ne prouve pas que le logement est vide.
    */
   readonly confirmedAbsence?: boolean;
+  /**
+   * La capability lue, quand la liaison vise un appareil. Décide du délai avant absence : seul un
+   * capteur qui ne publie que `alarm_motion` retombe dès que personne ne bouge.
+   */
+  readonly capabilityId?: string;
 }
 
 // --- Implémentation --------------------------------------------------------
@@ -467,6 +472,7 @@ export class HomeyApiHub {
     this.log = options.log ?? (() => undefined);
     this.logError = options.error ?? (() => undefined);
     this.weather = new WeatherFeed({
+      isReady: () => this.api !== null,
       fetch: async () => {
         const weather = this.api?.weather;
         if (weather === undefined) throw new Error('API météo indisponible');
@@ -483,6 +489,8 @@ export class HomeyApiHub {
       },
       parse: parseUsersPresence,
       label: 'Présence de Homey',
+      invalidMessage: 'aucun utilisateur actif avec une présence connue.',
+      isReady: () => this.api !== null,
       pollMs: PRESENCE_POLL_MS,
       retryMs: PRESENCE_RETRY_MS,
       timeoutMs: PRESENCE_FETCH_TIMEOUT_MS,

@@ -143,6 +143,8 @@ test('une lecture datée à la requête ne prévient les abonnés que si sa vale
     fetch: async () => values[Math.min(calls++, values.length - 1)],
     parse: (raw, fetchedAtMs) => (typeof raw === 'boolean' ? { value: raw, atMs: fetchedAtMs } : null),
     label: 'Présence',
+    invalidMessage: 'réponse inexploitable.',
+    isReady: () => true,
     pollMs: MIN,
     retryMs: MIN,
     timeoutMs: 1_000,
@@ -155,5 +157,41 @@ test('une lecture datée à la requête ne prévient les abonnés que si sa vale
   await presence.maybeFetch(t0 + MIN);
   await presence.maybeFetch(t0 + 2 * MIN);
   assert.deepEqual(seen, [true, false], 'la deuxième lecture, identique, ne réveille personne');
+  binding.destroy();
+});
+
+test('tant que l\'API n\'est pas montée, rien ne part et la relance à la connexion n\'est pas perdue', async () => {
+  let ready = false;
+  let calls = 0;
+  const errors: unknown[][] = [];
+  const weather = new WeatherFeed({
+    isReady: () => ready,
+    fetch: async () => {
+      calls += 1;
+      return { temperature: 6, when: '2026-10-28T10:00:00Z' };
+    },
+    error: (...args) => errors.push(args),
+  });
+  const binding = weather.bind();
+  await weather.maybeFetch(Date.now());
+  assert.equal(calls, 0, 'aucune requête avant l\'API');
+  assert.deepEqual(errors, [], 'aucune erreur journalisée à chaque démarrage');
+
+  ready = true;
+  await weather.maybeFetch(Date.now() + 5_000);
+  assert.equal(calls, 1, 'la relance faite à la connexion du hub part aussitôt');
+  assert.equal(weather.reading?.value, 6);
+  binding.destroy();
+});
+
+test('une réponse rejetée dit ce qui lui manque', async () => {
+  const errors: string[] = [];
+  const weather = new WeatherFeed({
+    fetch: async () => ({ temperature: 6 }),
+    error: (message) => errors.push(String(message)),
+  });
+  const binding = weather.bind();
+  await weather.maybeFetch(Date.now());
+  assert.match(errors[0] ?? '', /température datée en °C/);
   binding.destroy();
 });

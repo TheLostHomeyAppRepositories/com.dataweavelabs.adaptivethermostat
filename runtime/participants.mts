@@ -23,7 +23,10 @@ import {
 } from '../lib/constants.mjs';
 import { createBoilerState, ignitionAllowedAtMs, stepBoiler } from '../lib/boilerAggregator.mjs';
 import { addPreheatTarget, targetsAfterManualChange } from '../lib/preheat.mjs';
-import { DEFAULT_PRESENCE_OFF_DELAY_MIN, holdAbsence } from '../lib/presence.mjs';
+import {
+  ACTIVITY_STUCK_MS, DEFAULT_PRESENCE_OFF_DELAY_MIN, DETECTOR_OBSERVATION_GAP_MS, detectorActivityAtMs,
+  holdAbsence, isMotionOnlyCapability, trueSinceMs,
+} from '../lib/presence.mjs';
 import { restoreVThermState } from '../lib/state.mjs';
 import { stepVTherm } from '../lib/step.mjs';
 import type { CapValue, SourceBinding } from './hub.mjs';
@@ -236,7 +239,13 @@ function readNumber(
   return { value: reading.value, atMs: reading.atMs, stale: reading.stale };
 }
 
-function readBoolean(
+interface DetectorMemory {
+  activityAtMs: number | null;
+  trueSinceMs: number | null;
+  observedAtMs: number | null;
+}
+
+export function readBoolean(
   binding: SourceBinding | null,
   nowMs: number,
   freshnessMs: number,
@@ -290,8 +299,15 @@ export class VThermParticipant implements Tickable {
 
   private demandValue: Demand = { kind: 'unknown' };
   private wakeUpAt: number | null = null;
-  /** Échéance du délai avant absence : l'instant où un capteur muet basculera en « absent ». */
-  private presenceWakeUpAt: number | null = null;
+  /**
+   * Ce que l'on sait de chaque détecteur, par LIAISON — une re-désignation par Réparer repart de
+   * zéro au lieu d'hériter du passé de l'ancien appareil. `activityAtMs` : dernière activité lue,
+   * qu'un détecteur momentanément illisible garde au lieu de faire croire la maison calme.
+   * `trueSinceMs` : voir `trueSinceMs()`. `observedAtMs` : dernière lecture exploitable vue.
+   */
+  private readonly detectors = new WeakMap<SourceBinding, DetectorMemory>();
+  /** Instant de création : l'activité d'un détecteur jamais encore lu, faute de mieux. */
+  private readonly createdAtMs: number;
   private lastTickAtMs: number | null = null;
 
   private lastPersistAtMs: number;
@@ -342,6 +358,7 @@ export class VThermParticipant implements Tickable {
     this.requestTick = options.requestTick;
     this.roomSensorIsEmitter = options.roomSensorIsEmitter ?? (() => false);
     this.houseActivityAtMs = options.houseActivityAtMs ?? (() => null);
+    this.createdAtMs = options.nowMs;
     this.config = options.config;
     this.syncMode = options.syncMode;
     this.controlsBoilerFlag = options.controlsBoiler;
@@ -440,13 +457,14 @@ export class VThermParticipant implements Tickable {
     this.emitterAllSilent = silentSince(this.emitter.newestReportedAtMs);
 
     const roomTemp = readNumber(this.sources.room, nowMs, FRESHNESS.roomTempMs);
-    const inputs = this.collectInputs(roomTemp, nowMs);
+    const presence = this.resolvePresence(nowMs);
+    const inputs = this.collectInputs(roomTemp, presence.reading, nowMs);
 
     const { outputs, nextState } = stepVTherm(this.state, inputs, this.config, nowMs);
     this.state = nextState;
-    this.wakeUpAt = this.presenceWakeUpAt === null || outputs.wakeUpAtMs === null
-      ? outputs.wakeUpAtMs ?? this.presenceWakeUpAt
-      : Math.min(outputs.wakeUpAtMs, this.presenceWakeUpAt);
+    // Le délai avant absence a son échéance propre, hors du noyau : la plus proche des deux gagne.
+    const wakeUp = Math.min(outputs.wakeUpAtMs ?? Infinity, presence.wakeUpAtMs ?? Infinity);
+    this.wakeUpAt = Number.isFinite(wakeUp) ? wakeUp : null;
 
     const target = outputs.capabilities.target_temperature;
     if (typeof target === 'number') this.userSetpoint = target;
@@ -460,7 +478,11 @@ export class VThermParticipant implements Tickable {
     await this.refreshPreheatStatus();
   }
 
-  private collectInputs(roomTemp: Reading<number> | null, nowMs: number): VThermInputs {
+  private collectInputs(
+    roomTemp: Reading<number> | null,
+    presence: Reading<boolean> | null,
+    nowMs: number,
+  ): VThermInputs {
     const onoff = this.host.getCapabilityValue('onoff');
 
     return {
@@ -471,7 +493,7 @@ export class VThermParticipant implements Tickable {
       outdoorTemp: readNumber(this.sources.outdoor, nowMs, FRESHNESS.outdoorTempMs),
       windowContact: readBoolean(this.sources.windowContact, nowMs, FRESHNESS.windowContactMs),
       motion: readBoolean(this.sources.motion, nowMs, FRESHNESS.motionMs),
-      presence: this.resolvePresenceForTick(nowMs),
+      presence,
       emitterHeating: this.emitter.readHeating(nowMs),
       // Joignable ET pourvu d'une consigne : c'est la preuve que la détection a eu lieu. Avant
       // elle, toutes les capabilities valent faux, et l'absence d'état de chauffe ne prouve rien.
@@ -501,7 +523,20 @@ export class VThermParticipant implements Tickable {
     const binding = this.sources.presence;
     const reading = readBoolean(binding, nowMs, FRESHNESS.presenceMs);
     const delayMs = (this.config.presenceOffDelayMin ?? DEFAULT_PRESENCE_OFF_DELAY_MIN) * MS_PER_MINUTE;
-    if (binding?.confirmedAbsence !== true) return holdAbsence(reading, nowMs, delayMs);
+    if (binding?.confirmedAbsence !== true) {
+      // Seul un détecteur de MOUVEMENT retombe dès que personne ne bouge. Un capteur de présence —
+      // mmWave, appareil virtuel piloté par géofence, état d'alarme — dit déjà l'absence.
+      if (binding === null || !isMotionOnlyCapability(binding.capabilityId)) return { reading, wakeUpAtMs: null };
+      // Figé sur « quelqu'un » depuis plus de `ACTIVITY_STUCK_MS` (pile morte, animal) : il compte
+      // comme retombé à cette borne, et le délai court ensuite.
+      const since = this.observeDetector(binding, reading, nowMs).trueSinceMs;
+      if (reading !== null && reading.value && since !== null) {
+        const stuckAtMs = since + ACTIVITY_STUCK_MS;
+        if (nowMs < stuckAtMs) return { reading, wakeUpAtMs: stuckAtMs };
+        return holdAbsence({ ...reading, value: false, atMs: stuckAtMs }, nowMs, delayMs);
+      }
+      return holdAbsence(reading, nowMs, delayMs);
+    }
 
     // Présence de Homey : personne n'est géolocalisé, mais un détecteur de la maison a vu quelqu'un
     // il y a moins que le délai — la nounou est restée avec les enfants. L'absence attend que la
@@ -514,33 +549,61 @@ export class VThermParticipant implements Tickable {
   }
 
   /**
-   * Dernière activité que les détecteurs DE CE thermostat ont vue : maintenant s'ils voient
-   * quelqu'un, sinon l'instant où ils sont retombés. Le détecteur de présence ne compte que s'il
-   * est un vrai capteur — la présence de Homey n'est pas une activité dans la maison.
+   * Dernière activité que les détecteurs DE CE thermostat ont vue (`detectorActivityAtMs`). Le
+   * détecteur de présence ne compte que s'il est un vrai capteur — la présence de Homey n'est pas
+   * une activité dans la maison.
+   *
+   * Un détecteur illisible rend sa dernière activité connue ; jamais lu depuis la création du
+   * thermostat (démarrage, liaison pas encore rattachée), il compte comme actif à la création. Le
+   * logement n'est donc pas vidé au démarrage, et un détecteur définitivement disparu cesse de le
+   * retenir un délai après.
    */
   lastActivityAtMs(nowMs: number): number | null {
     let latest: number | null = null;
-    const consider = (binding: SourceBinding | null, freshnessMs: number): void => {
+    const consider = (key: 'motion' | 'presence', freshnessMs: number): void => {
+      const binding = this.sources[key];
       if (binding === null || binding.confirmedAbsence === true) return;
       const reading = readBoolean(binding, nowMs, freshnessMs);
-      if (reading === null || reading.stale) return;
-      const atMs = reading.value ? nowMs : reading.atMs;
+      const known = this.observeDetector(binding, reading, nowMs);
+      // La borne du figé ne vaut que pour le mouvement : un mmWave reste à vrai toute une nuit
+      // devant une nounou endormie, et la maison n'est pas vide pour autant.
+      const stuckSince = isMotionOnlyCapability(binding.capabilityId) ? known.trueSinceMs : null;
+      const atMs = detectorActivityAtMs(reading, nowMs, stuckSince) ?? known.activityAtMs ?? this.createdAtMs;
       if (latest === null || atMs > latest) latest = atMs;
     };
-    consider(this.sources.motion, FRESHNESS.motionMs);
-    consider(this.sources.presence, FRESHNESS.presenceMs);
+    consider('motion', FRESHNESS.motionMs);
+    consider('presence', FRESHNESS.presenceMs);
     return latest;
+  }
+
+  /**
+   * Met à jour, puis rend, ce que l'on sait d'un détecteur. Idempotent pour un même instant.
+   *
+   * Un appel dont l'instant précède la dernière observation — une condition Flow à l'heure murale
+   * pendant un pas daté plus tôt — lit sans écrire : la mémoire ne recule jamais. Une lecture
+   * absente ne compte pas comme une observation : un détecteur resté hors ligne plus que
+   * `DETECTOR_OBSERVATION_GAP_MS` n'a pas été vu à vrai sans interruption.
+   */
+  private observeDetector(binding: SourceBinding, reading: Reading<boolean> | null, nowMs: number): DetectorMemory {
+    const previous = this.detectors.get(binding)
+      ?? { activityAtMs: null, trueSinceMs: null, observedAtMs: null };
+    const watched = previous.observedAtMs !== null && nowMs - previous.observedAtMs <= DETECTOR_OBSERVATION_GAP_MS;
+    const since = trueSinceMs(reading, watched ? previous.trueSinceMs : null);
+    const activityAtMs = detectorActivityAtMs(
+      reading, nowMs, isMotionOnlyCapability(binding.capabilityId) ? since : null,
+    );
+    const known: DetectorMemory = {
+      activityAtMs: activityAtMs ?? previous.activityAtMs,
+      trueSinceMs: since,
+      observedAtMs: reading === null ? previous.observedAtMs : nowMs,
+    };
+    if (previous.observedAtMs === null || nowMs >= previous.observedAtMs) this.detectors.set(binding, known);
+    return known;
   }
 
   /** Ce thermostat suit-il la présence de Homey, donc l'activité de toute la maison ? */
   get followsHouseActivity(): boolean {
     return this.presenceOverride === 'auto' && this.sources.presence?.confirmedAbsence === true;
-  }
-
-  private resolvePresenceForTick(nowMs: number): Reading<boolean> | null {
-    const { reading, wakeUpAtMs } = this.resolvePresence(nowMs);
-    this.presenceWakeUpAt = wakeUpAtMs;
-    return reading;
   }
 
   /**

@@ -9,7 +9,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  holdAbsence, isPresenceMisused, parseUsersPresence, PRESENCE_SOURCE_ID,
+  ACTIVITY_STUCK_MS, detectorActivityAtMs, holdAbsence, isMotionOnlyCapability, isPresenceMisused, parseUsersPresence,
+  PRESENCE_SOURCE_ID, trueSinceMs,
 } from '../lib/presence.mjs';
 
 const MIN = 60_000;
@@ -74,4 +75,40 @@ test('présent, périmé ou sans lecture : rien à retenir', () => {
   assert.deepEqual(holdAbsence(present, NOW, 60 * MIN), { reading: present, wakeUpAtMs: null });
   assert.deepEqual(holdAbsence(stale, NOW, 60 * MIN), { reading: stale, wakeUpAtMs: null });
   assert.deepEqual(holdAbsence(null, NOW, 60 * MIN), { reading: null, wakeUpAtMs: null });
+});
+
+test('activité d\'un détecteur : retombé, voyant, bloqué, périmé ou muet', () => {
+  assert.equal(detectorActivityAtMs({ value: false, atMs: NOW - 5 * MIN, stale: false }, NOW, null), NOW - 5 * MIN);
+  assert.equal(detectorActivityAtMs({ value: true, atMs: NOW - 5 * MIN, stale: false }, NOW, NOW - 5 * MIN), NOW);
+  assert.equal(
+    detectorActivityAtMs({ value: true, atMs: NOW - MIN, stale: false }, NOW, NOW - 2 * ACTIVITY_STUCK_MS),
+    NOW - ACTIVITY_STUCK_MS,
+    'un « quelqu\'un » figé cesse de compter douze heures après le premier vrai vu, re-rapports ou non',
+  );
+  assert.equal(
+    detectorActivityAtMs({ value: true, atMs: NOW - 2 * ACTIVITY_STUCK_MS, stale: false }, NOW, null), NOW,
+    'sans borne (vrai capteur de présence), une nuit entière à vrai reste de l\'activité',
+  );
+  assert.equal(
+    detectorActivityAtMs({ value: false, atMs: NOW - 5 * MIN, stale: true }, NOW, null), NOW - 5 * MIN,
+    'hors ligne, il garde la dernière activité vue au lieu de l\'effacer',
+  );
+  assert.equal(detectorActivityAtMs(null, NOW, null), null);
+});
+
+test('mouvement seul : `alarm_motion` et ses sous-capabilities, rien d\'autre', () => {
+  assert.equal(isMotionOnlyCapability('alarm_motion'), true);
+  assert.equal(isMotionOnlyCapability('alarm_motion.person'), true);
+  assert.equal(isMotionOnlyCapability('alarm_presence'), false);
+  assert.equal(isMotionOnlyCapability('alarm_occupancy'), false);
+  assert.equal(isMotionOnlyCapability('alarm_motion_sensitivity'), false);
+  assert.equal(isMotionOnlyCapability(undefined), false);
+});
+
+test('« vrai depuis » : le premier vrai vu, effacé au premier faux, inchangé sans lecture', () => {
+  const on = (atMs: number) => ({ value: true, atMs, stale: false });
+  assert.equal(trueSinceMs(on(NOW), null), NOW);
+  assert.equal(trueSinceMs(on(NOW + MIN), NOW), NOW, 'un re-rapport ne rajeunit pas');
+  assert.equal(trueSinceMs({ value: false, atMs: NOW, stale: false }, NOW - MIN), null);
+  assert.equal(trueSinceMs(null, NOW - MIN), NOW - MIN);
 });

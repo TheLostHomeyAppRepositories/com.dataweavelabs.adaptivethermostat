@@ -14,6 +14,8 @@ type Logger = (...args: unknown[]) => void;
 export interface WeatherFeedOptions {
   /** Rend la réponse brute de `getWeather()`, ou lève si l'API n'est pas joignable. */
   fetch: () => Promise<unknown>;
+  /** L'API météo est-elle montée ? Absent = toujours. */
+  isReady?: () => boolean;
   pollMs?: number;
   retryMs?: number;
   timeoutMs?: number;
@@ -26,6 +28,8 @@ export class WeatherFeed extends PolledFeed<number> {
       fetch: options.fetch,
       parse: parseWeatherReading,
       label: 'Météo de Homey',
+      invalidMessage: 'réponse sans température datée en °C.',
+      isReady: options.isReady ?? (() => true),
       pollMs: options.pollMs ?? WEATHER_POLL_MS,
       retryMs: options.retryMs ?? WEATHER_RETRY_MS,
       timeoutMs: options.timeoutMs ?? WEATHER_FETCH_TIMEOUT_MS,
